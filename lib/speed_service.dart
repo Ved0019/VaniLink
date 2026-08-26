@@ -19,7 +19,7 @@ class SpeechService {
 
     // 1. Configure Offline STT (IndicConformer CTC / INT8)
     final sttConfig = OfflineRecognizerConfig(
-      modelConfig: OfflineModelConfig(
+      modelConfig: const OfflineModelConfig(
         nemoCtc: OfflineNemoEncDecCtcModelConfig(
           model: 'assets/models/stt/model.int8.onnx',
         ),
@@ -36,7 +36,7 @@ class SpeechService {
     _sttEngine = OfflineRecognizer(config: sttConfig);
 
     // 2. Configure Offline TTS (Piper / MMS-TTS)
-    final ttsConfig = OfflineTtsConfig(
+    const ttsConfig = OfflineTtsConfig(
       model: OfflineTtsModelConfig(
         vits: OfflineTtsVitsModelConfig(
           model: 'assets/models/tts/model.onnx',
