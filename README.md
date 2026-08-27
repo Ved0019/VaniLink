@@ -2,6 +2,18 @@
 
 iTantra is an offline, peer-to-peer Android walkie-talkie application built with Flutter. It uses on-device Indic speech recognition and speech synthesis, so audio can be processed locally without a cloud service.
 
+## Product Vision
+
+iTantra is intended to become a fully offline, local-first neural transceiver for voice communication across 10 target languages: Hindi, Gujarati, Marathi, Kannada, Malayalam, Tamil, Telugu, Odia, Bengali, and English.
+
+Instead of sending large voice recordings, the application processes speech on the device, sends compact text payloads over a local peer-to-peer connection, and synthesizes the text back into speech on the receiving phone. This approach is designed to improve privacy, reduce bandwidth usage, and keep communication available when cellular or internet infrastructure is unavailable.
+
+### Planned user modes
+
+- **Push-to-talk:** Microphone capture is controlled by a physical or virtual PTT button.
+- **Phone mode:** Hands-free monitoring uses voice activity detection to identify spoken sentences.
+- **Emergency alerts:** High-volume alert playback for distress messages, subject to Android audio and permission rules.
+
 ## Features
 
 - Offline speech-to-text and text-to-speech with Sherpa-ONNX.
@@ -44,6 +56,29 @@ iTantra/
 3. Recorded 16 kHz PCM samples are passed to `transcribeAudio()`.
 4. Text is exchanged with a peer over the P2P connection.
 5. Received text is passed to `synthesizeSpeech()` and played locally.
+
+## Planned Technical Architecture
+
+The current implementation establishes the Flutter shell, audio dependencies, P2P dependency, and Sherpa-ONNX speech service. The following components describe the planned end-to-end architecture:
+
+### Offline speech pipeline
+
+- **Voice activity detection:** Add a lightweight Silero VAD model to process microphone input in short chunks and activate STT only when speech is detected.
+- **Speech-to-text:** Use quantized IndicConformer models for Indian languages, with an optimized English model where appropriate.
+- **Text-to-speech:** Use compact VITS/Piper and MMS TTS models for the supported languages.
+- **Resource limits:** Keep inference local and optimize model loading and execution for mid-range Android devices.
+
+### Peer-to-peer networking
+
+- Use Wi-Fi Direct as the primary transport for local communication.
+- Add Bluetooth as a short-range, low-power fallback where supported.
+- Add network service discovery so peers can find the group owner without manual IP and port configuration.
+- Pause outgoing messages and buffer them while a disconnected peer is reconnecting.
+- Add peer authentication with a secure challenge-response handshake before resuming delivery.
+
+### Bandwidth and resilience goals
+
+Transmitting text instead of raw audio is intended to reduce message size substantially and avoid cloud round trips. The target is low-latency local communication with privacy preserved by keeping VAD, STT, TTS, and message processing on-device.
 
 ## Prerequisites
 
