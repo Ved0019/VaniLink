@@ -14,7 +14,7 @@ dependencies:
   sherpa_onnx: ^1.10.42
 
   # Microphone audio recording and playback
-  record: ^5.1.2
+  record: 7.1.1
   audioplayers: ^6.0.0
 
   # Wi-Fi Direct (P2P) networking
