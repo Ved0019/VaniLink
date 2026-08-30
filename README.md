@@ -1,4 +1,4 @@
-# iTantra
+# VaniLink
 
 iTantra is an offline, peer-to-peer Android walkie-talkie application built with Flutter. It uses on-device Indic speech recognition and speech synthesis, so audio can be processed locally without a cloud service.
 
