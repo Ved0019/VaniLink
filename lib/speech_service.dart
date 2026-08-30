@@ -24,12 +24,10 @@ class SpeechService {
 
       // Initialize STT Engine (Sherpa-ONNX OfflineRecognizer)
       try {
+        // Fix: OfflineRecognizer takes the config as a positional argument
         _sttEngine = sherpa_onnx.OfflineRecognizer(
-          config: sherpa_onnx.OfflineRecognizerConfig(
+          sherpa_onnx.OfflineRecognizerConfig(
             model: sherpa_onnx.OfflineModelConfig(
-              // NOTE: Update this configuration (e.g., transducer, paraformer, nemoCtc)
-              // depending on the exact architecture of your ONNX model.
-              // Assuming paraformer or a generic single-file model structure here:
               paraformer: sherpa_onnx.OfflineParaformerModelConfig(
                 model: sttModelPath,
               ),
@@ -46,19 +44,22 @@ class SpeechService {
 
       // Extract and Initialize TTS Engine (Sherpa-ONNX OfflineTts)
       try {
-        // Note: You must ensure these TTS files exist in your assets folder
-        // and are registered in pubspec.yaml. Modify paths as needed.
-        final ttsModelPath = await _extractAsset('assets/models/tts/model.int8.onnx');
-        final ttsTokensPath = await _extractAsset('assets/models/tts/tokens.txt');
-        final ttsLexiconPath = await _extractAsset('assets/models/tts/lexicon.txt'); // Usually required for TTS
+        final ttsModelPath = await _extractAsset('assets/models/tts/en/model.onnx');
+        final ttsTokensPath = await _extractAsset('assets/models/tts/en/tokens.txt');
+        
+        // Extract espeak-ng-data zip
+        final ttsDataZipPath = await _extractAsset('assets/models/tts/en/espeak-ng-data.zip');
+        // Provide the data dir path (this implies espeak-ng-data should be extracted to this directory if needed)
+        final ttsDataDir = ttsDataZipPath.replaceAll('.zip', '');
 
+        // Fix: OfflineTts takes the config as a positional argument
         _ttsEngine = sherpa_onnx.OfflineTts(
-          config: sherpa_onnx.OfflineTtsConfig(
+          sherpa_onnx.OfflineTtsConfig(
             model: sherpa_onnx.OfflineTtsModelConfig(
               vits: sherpa_onnx.OfflineTtsVitsModelConfig(
                 model: ttsModelPath,
-                lexicon: ttsLexiconPath,
                 tokens: ttsTokensPath,
+                dataDir: ttsDataDir,
               ),
               numThreads: 1,
               debug: false,

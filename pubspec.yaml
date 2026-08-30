@@ -35,5 +35,6 @@ flutter:
 
   # Register bundled on-device quantized model assets
   assets:
-    - assets/models/stt/
-    - assets/models/tts/
+  - assets/models/stt/indic/
+  - assets/models/tts/en/
+  

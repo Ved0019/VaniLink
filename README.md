@@ -40,8 +40,8 @@ VaniLink/
 |   `-- speech_service.dart   # Offline STT and TTS service
 |-- assets/
 |   `-- models/
-|       |-- stt/              # STT ONNX model and tokens
-|       `-- tts/              # TTS ONNX model, tokens, and espeak data
+|       |-- stt/indic/        # STT ONNX model and tokens
+|       `-- tts/en/           # TTS ONNX model, tokens, and espeak data
 |-- test/
 |   `-- widget_test.dart      # Flutter widget tests
 |-- android/                  # Android project and Gradle files
