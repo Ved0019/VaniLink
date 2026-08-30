@@ -1,7 +1,7 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import '../audio/microphone_handler.dart';
-import '../speech_service.dart';
+import 'package:vanilink/services/speech_to_text_service.dart';
+import 'package:vanilink/services/language_router.dart';
+import 'package:vanilink/services/vad_service.dart';
 
 class WalkieTalkieScreen extends StatefulWidget {
   const WalkieTalkieScreen({Key? key}) : super(key: key);
@@ -11,82 +11,84 @@ class WalkieTalkieScreen extends StatefulWidget {
 }
 
 class _WalkieTalkieScreenState extends State<WalkieTalkieScreen> {
-  bool _isRecording = false;
-  String _lastTranscribedText = "Press and hold to speak";
+  // Instantiate your teammate's master service facade
+  final SpeechToTextService _sttService = SpeechToTextService();
+  
+  bool _isListening = false;
+  String _latestTranscript = "Press and hold to speak";
+  double _speechProbability = 0.0;
 
-  void _startRecording() async {
-    setState(() => _isRecording = true);
-    try {
-      await MicrophoneHandler().startRecordingStream();
-    } catch (e) {
-      setState(() {
-        _isRecording = false;
-        _lastTranscribedText = "Error: $e";
-      });
-    }
+  @override
+  void initState() {
+    super.initState();
+    _initializeSttPipeline();
   }
 
-  void _stopRecording() async {
-    if (!_isRecording) return;
-    
-    setState(() {
-      _isRecording = false;
-      _lastTranscribedText = "Transcribing...";
+  Future<void> _initializeSttPipeline() async {
+    // 1. Initialize all models in memory
+    await _sttService.init();
+
+    // 2. Set default language (e.g., Hindi uses IndicConformer, English uses Vosk)
+    _sttService.setLanguage(AppLanguage.hindi);
+
+    // 3. Listen to real-time transcribed text stream
+    _sttService.transcriptionStream.listen((String transcribedText) {
+      setState(() {
+        _latestTranscript = transcribedText;
+      });
+      
+      // TODO: Pass this text string to:
+      // - Your P2P Network Manager (`P2PManager().sendTranscript(transcribedText)`)
+      // - Your chat history ledger
     });
 
-    try {
-      // 1. Get the recorded audio buffer
-      final Uint8List audioBytes = await MicrophoneHandler().stopRecordingAndGetBuffer();
-      
-      // 2. Transcribe locally using the AI Engine
-      if (SpeechService().isInitialized) {
-        final String spokenText = SpeechService().transcribeAudio(audioBytes);
-        setState(() {
-          _lastTranscribedText = spokenText.isEmpty ? "No speech detected." : spokenText;
-        });
-      } else {
-        setState(() {
-          _lastTranscribedText = "AI models are still loading...";
-        });
-      }
-    } catch (e) {
-      setState(() => _lastTranscribedText = "Transcription failed: $e");
-    }
+    // 4. Listen to VAD states for live UI wave/volume visualizers[cite: 3]
+    _sttService.speechProbabilityStream.listen((double probability) {
+      setState(() {
+        _speechProbability = probability;
+      });
+    });
+  }
+
+  void _onPressDown() async {
+    setState(() => _isListening = true);
+    await _sttService.startListening(); // Triggers VAD and mic capture[cite: 3]
+  }
+
+  void _onPressUp() async {
+    setState(() => _isListening = false);
+    await _sttService.stopListening(); // Flushes buffers and finalizes transcription[cite: 3]
+  }
+
+  @override
+  void dispose() {
+    _sttService.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('VaniLink - Offline P2P')),
+      appBar: AppBar(title: const Text('VaniLink - iTantra Core')),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Text(
-              _lastTranscribedText,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-            ),
-          ),
+          // Live Probability Visualizer Indicator
+          LinearProgressIndicator(value: _speechProbability),
+          const SizedBox(height: 20),
+          Text(_latestTranscript, style: const TextStyle(fontSize: 18)),
           const SizedBox(height: 40),
           GestureDetector(
-            onTapDown: (_) => _startRecording(),
-            onTapUp: (_) => _stopRecording(),
-            onTapCancel: () => _stopRecording(),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: _isRecording ? 200 : 160,
-              height: _isRecording ? 200 : 160,
+            onTapDown: (_) => _onPressDown(),
+            onTapUp: (_) => _onPressUp(),
+            child: Container(
+              width: 100,
+              height: 100,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _isRecording ? Colors.redAccent : Colors.blueAccent,
-                boxShadow: [
-                  if (_isRecording)
-                    BoxShadow(color: Colors.red.withOpacity(0.5), blurRadius: 30)
-                ],
+                color: _isListening ? Colors.red : Colors.blue,
               ),
-              child: const Icon(Icons.mic, size: 80, color: Colors.white),
+              child: const Icon(Icons.mic, color: Colors.white, size: 50),
             ),
           ),
         ],
