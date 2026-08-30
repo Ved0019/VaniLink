@@ -122,3 +122,4 @@ class LatencyTracker {
     _controller.close();
   }
 }
+

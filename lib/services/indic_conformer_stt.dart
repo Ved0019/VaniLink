@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' hide SpeechSegment;
 import 'package:vanilink/services/stt_engine_interface.dart';
