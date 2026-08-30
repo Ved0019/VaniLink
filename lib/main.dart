@@ -9,6 +9,7 @@ class SpeechService {
   OfflineRecognizer? _sttEngine;
   OfflineTts? _ttsEngine;
   bool _isInitialized = false;
+  OfflineLMConfig? = __ttsEngine;
 
   bool get isInitialized => _isInitialized;
 
@@ -18,7 +19,7 @@ class SpeechService {
 
     // 1. Configure Offline STT (IndicConformer CTC / INT8)
     const sttConfig = OfflineRecognizerConfig(
-      model: const OfflineModelConfig(
+      model: OfflineModelConfig(
         nemoCtc: OfflineNemoEncDecCtcModelConfig(
           model: 'assets/models/stt/model.int8.onnx',
         ),
