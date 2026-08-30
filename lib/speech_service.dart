@@ -1,7 +1,5 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:archive/archive_io.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
@@ -51,8 +49,10 @@ class SpeechService {
         ),
       );
       _sttReady = true;
+      print('✅ STT (IndicConformer) initialized successfully');
     } catch (e) {
       // STT unavailable — app degrades gracefully
+      print('⚠️ STT initialization failed. Offline transcription unavailable: $e');
       _sttReady = false;
     }
 
@@ -78,9 +78,20 @@ class SpeechService {
           await _extractAsset('assets/models/tts/$langCode/model.onnx');
       final tokensPath =
           await _extractAsset('assets/models/tts/$langCode/tokens.txt');
-
-      // Extract the espeak-ng-data zip into a real directory
-      final dataDir = await _extractEspeakData(langCode);
+      
+      // Try to locate eSpeak-ng data directory
+      // First check if espeak-ng-data directory exists in cache
+      final dir = await getApplicationCacheDirectory();
+      final espeakDataDir = Directory('${dir.path}/espeak-ng-data');
+      
+      String espeakDataPath = '';
+      if (espeakDataDir.existsSync()) {
+        espeakDataPath = espeakDataDir.path;
+        print('✅ Using existing eSpeak-ng data: $espeakDataPath');
+      } else {
+        print('⚠️ eSpeak-ng data not found at ${espeakDataDir.path}');
+        print('   Tip: Extract espeak-ng-data.zip to: ${espeakDataDir.path}');
+      }
 
       _ttsEngine = sherpa_onnx.OfflineTts(
         sherpa_onnx.OfflineTtsConfig(
@@ -88,7 +99,7 @@ class SpeechService {
             vits: sherpa_onnx.OfflineTtsVitsModelConfig(
               model: modelPath,
               tokens: tokensPath,
-              dataDir: dataDir,
+              dataDir: espeakDataPath.isNotEmpty ? espeakDataPath : '',
             ),
             numThreads: 2,
             debug: false,
@@ -96,46 +107,14 @@ class SpeechService {
         ),
       );
       _ttsReady = true;
+      print('✅ TTS ($langCode) initialized successfully');
     } catch (e) {
       // TTS unavailable for this language — not fatal
-      debugPrint('TTS load failed for $langCode: $e');
+      print('⚠️ TTS initialization failed for language: $langCode');
+      print('   Error: $e');
+      print('   See ONNX_MODEL_SETUP.md for model download instructions');
       _ttsReady = false;
     }
-  }
-
-  /// Extracts `espeak-ng-data.zip` from assets into the app cache directory.
-  /// Returns the path to the extracted `espeak-ng-data/` folder.
-  Future<String> _extractEspeakData(String langCode) async {
-    final dir = await getApplicationCacheDirectory();
-    final extractedDir = Directory('${dir.path}/espeak-ng-data-$langCode');
-
-    // Skip extraction if already done
-    if (extractedDir.existsSync() && extractedDir.listSync().isNotEmpty) {
-      return extractedDir.path;
-    }
-
-    // Extract zip from assets to a temp file, then unzip it
-    final zipAssetPath = 'assets/models/tts/$langCode/espeak-ng-data.zip';
-    final zipFile = File('${dir.path}/espeak-ng-data-$langCode.zip');
-    final data = await rootBundle.load(zipAssetPath);
-    await zipFile.writeAsBytes(data.buffer.asUint8List());
-
-    // Decompress
-    extractedDir.createSync(recursive: true);
-    final zipBytes = await zipFile.readAsBytes();
-    final archive = ZipDecoder().decodeBytes(zipBytes);
-    for (final file in archive.files) {
-      if (file.isFile) {
-        final outFile = File('${extractedDir.path}/${file.name}');
-        outFile.createSync(recursive: true);
-        outFile.writeAsBytesSync(file.content as List<int>);
-      }
-    }
-
-
-    // Clean up zip
-    await zipFile.delete();
-    return extractedDir.path;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

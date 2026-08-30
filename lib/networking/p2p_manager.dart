@@ -13,8 +13,8 @@ class P2PManager {
   /// Exposes the underlying FlutterP2pConnection so callers can stream peers.
   FlutterP2pConnection get p2p => _p2p;
   
-  // Callback to handle incoming text payloads from the remote phone
-  Function(String)? onMessageReceived;
+  // Callback to handle incoming text payloads and location from the remote phone
+  Function(String text, double? lat, double? lng)? onMessageReceived;
 
   /// Initializes the Wi-Fi Direct framework and listeners
   Future<void> initialize() async {
@@ -67,7 +67,10 @@ class P2PManager {
     try {
       final jsonMap = jsonDecode(req);
       if (jsonMap['type'] == 'transcript' && onMessageReceived != null) {
-        onMessageReceived!(jsonMap['payload']);
+        final text = jsonMap['payload'] as String;
+        final lat = jsonMap['lat'] as double?;
+        final lng = jsonMap['lng'] as double?;
+        onMessageReceived!(text, lat, lng);
       }
     } catch (e) {
       debugPrint('Error decoding incoming P2P payload: $e');
@@ -91,10 +94,12 @@ class P2PManager {
   }
 
   /// Transmits the compressed text transcript over the low-bitrate P2P link
-  Future<void> sendTranscript(String text) async {
+  Future<void> sendTranscript(String text, {double? lat, double? lng}) async {
     final payload = jsonEncode({
       'type': 'transcript',
       'payload': text,
+      if (lat != null) 'lat': lat,
+      if (lng != null) 'lng': lng,
     });
     
     _p2p.sendStringToSocket(payload);

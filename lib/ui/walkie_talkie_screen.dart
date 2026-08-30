@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 import 'package:vanilink/audio/emergency_volume.dart';
 import 'package:vanilink/audio/tts_player.dart';
 import 'package:vanilink/models/latency_tracker.dart';
@@ -10,20 +14,15 @@ import 'package:vanilink/services/language_router.dart';
 import 'package:vanilink/services/speech_to_text_service.dart';
 import 'package:vanilink/speech_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data model for messages shown in the chat ledger
-// ─────────────────────────────────────────────────────────────────────────────
-class _ChatMessage {
-  final String text;
-  final bool isMine;
+class PeerLocation {
+  final String ip;
+  final LatLng position;
+  final String lastMessage;
   final DateTime timestamp;
-  _ChatMessage({required this.text, required this.isMine})
-      : timestamp = DateTime.now();
+
+  PeerLocation(this.ip, this.position, this.lastMessage, this.timestamp);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main screen
-// ─────────────────────────────────────────────────────────────────────────────
 class EditorialWalkieTalkieScreen extends StatefulWidget {
   const EditorialWalkieTalkieScreen({super.key});
 
@@ -34,614 +33,616 @@ class EditorialWalkieTalkieScreen extends StatefulWidget {
 
 class _EditorialWalkieTalkieScreenState
     extends State<EditorialWalkieTalkieScreen> {
-  // ── Services ────────────────────────────────────────────────────────────────
-  final _stt = SpeechToTextService();
-  final _p2p = P2PManager();
-  final _ttsPlayer = TtsPlayer();
-  final _latency = LatencyTracker();
+  // Services
+  final SpeechToTextService _stt = SpeechToTextService();
+  final P2PManager _p2p = P2PManager();
+  final LatencyTracker _latency = LatencyTracker();
 
-  // ── State ───────────────────────────────────────────────────────────────────
-  bool _isRecording = false;
-  bool _isConnected = false;
+  // State
+  String _liveTranscript = '';
+  double _speechProb = 0.0;
   bool _isEmergencyMode = false;
-  bool _isInitializing = true;
-  String _initError = '';
+  bool _showMap = false;
+  AppLanguage _selectedLanguage = AppLanguage.english;
 
-  AppLanguage _selectedLanguage = AppLanguage.hindi;
-  double _speechProbability = 0.0;
-  String _liveTranscript = 'Hold the transmit button to speak';
-  LatencyReport? _lastLatency;
+  // Connection State
+  String _connectionStatus = 'Disconnected';
+  List<DiscoveredPeers> _peers = [];
+  WifiP2PInfo? _wifiP2PInfo;
 
-  final List<_ChatMessage> _messages = [];
-  final List<DiscoveredPeers> _discoveredPeers = [];
+  // Location State
+  Position? _currentPosition;
+  final Map<String, PeerLocation> _peerLocations = {};
+  StreamSubscription<Position>? _positionStream;
+  final MapController _mapController = MapController();
 
-  // ── Subscriptions ────────────────────────────────────────────────────────────
-  StreamSubscription<String>? _transcriptSub;
-  StreamSubscription<double>? _probabilitySub;
-  StreamSubscription<LatencyReport>? _latencySub;
-
-  // ── Design tokens ────────────────────────────────────────────────────────────
-  static const _bgLight = Color(0xFFF4F5F7);
-  static const _cardDark = Color(0xFF0F291E);
-  static const _accentOrange = Color(0xFFD95338);
-  static const _textMain = Color(0xFF111827);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Lifecycle
-  // ─────────────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _boot();
+    _initServices();
+    _initLocation();
   }
 
-  Future<void> _boot() async {
-    // 1. Initialize STT pipeline
-    try {
-      await _stt.init();
-      _stt.setLanguage(_selectedLanguage);
-    } catch (e) {
-      setState(() => _initError = 'STT init: $e');
-    }
-
-    // 2. Initialize sherpa-onnx TTS bindings
-    try {
-      await SpeechService().initModels();
-    } catch (e) {
-      // TTS is optional — app still useful without it
-      debugPrint('TTS init note: $e');
-    }
-
-    // 3. Initialize P2P and hook up the receive callback
+  Future<void> _initServices() async {
+    await _stt.init();
     await _p2p.initialize();
-    _p2p.onMessageReceived = _onIncomingTranscript;
 
-    // 4. Watch P2P connection state
-    _p2p.streamWifiP2PInfo().listen((info) {
-      if (mounted) setState(() => _isConnected = info.isConnected);
-    });
-
-    // 5. Subscribe to STT transcript stream
-    _transcriptSub = _stt.transcriptionStream.listen((text) async {
-      if (text.isEmpty) return;
-      _latency.onSttCompleted();
-      setState(() {
-        _liveTranscript = text;
-        _messages.add(_ChatMessage(text: text, isMine: true));
-      });
-      // Send over P2P
-      await _p2p.sendTranscript(text);
-      _latency.onP2pSent();
-    });
-
-    // 6. Subscribe to VAD probability for the waveform visualizer
-    _probabilitySub = _stt.speechProbabilityStream.listen((p) {
-      if (mounted) setState(() => _speechProbability = p);
-    });
-
-    // 7. Subscribe to latency reports for the debug overlay
-    _latencySub = _latency.reportStream.listen((r) {
-      if (mounted) setState(() => _lastLatency = r);
-    });
-
-    if (mounted) setState(() => _isInitializing = false);
-  }
-
-  // ── PTT handlers ─────────────────────────────────────────────────────────
-  void _onPttDown() {
-    if (_isInitializing) return;
-    setState(() {
-      _isRecording = true;
-      _liveTranscript = 'Listening…';
-    });
-    _latency.onSpeechStarted();
-    _stt.startListening();
-  }
-
-  void _onPttUp() {
-    if (!_isRecording) return;
-    setState(() => _isRecording = false);
-    _stt.stopListening();
-  }
-
-  // ── Incoming P2P message → TTS ────────────────────────────────────────────
-  Future<void> _onIncomingTranscript(String text) async {
-    _latency.onP2pReceived();
-    if (!mounted) return;
-    setState(() => _messages.add(_ChatMessage(text: text, isMine: false)));
-
-    try {
-      final samples = SpeechService().synthesizeSpeech(text);
-      _latency.onTtsPlayed();
-      if (_isEmergencyMode) {
-        await _ttsPlayer.playAlert(samples);
-      } else {
-        await _ttsPlayer.playSpeech(samples);
+    // Listen to STT live partials
+    _stt.transcriptionStream.listen((text) {
+      setState(() => _liveTranscript = text);
+      if (text.isNotEmpty) {
+        _p2p.sendTranscript(
+          text,
+          lat: _currentPosition?.latitude,
+          lng: _currentPosition?.longitude,
+        );
       }
-    } catch (e) {
-      debugPrint('TTS playback error: $e');
-    }
-  }
+    });
 
-  // ── Language change ───────────────────────────────────────────────────────
-  void _onLanguageChanged(AppLanguage? lang) {
-    if (lang == null) return;
-    setState(() => _selectedLanguage = lang);
-    _stt.setLanguage(lang);
-  }
+    // Listen to STT VAD probability for UI feedback
+    _stt.speechProbabilityStream.listen((prob) {
+      setState(() => _speechProb = prob);
+    });
 
-  // ── Emergency toggle ──────────────────────────────────────────────────────
-  Future<void> _toggleEmergency() async {
-    final next = !_isEmergencyMode;
-    if (next) {
-      await EmergencyVolume.activate();
-    } else {
-      await EmergencyVolume.deactivate();
-    }
-    setState(() => _isEmergencyMode = next);
-  }
+    // Listen to P2P network changes
+    _p2p.streamWifiP2PInfo().listen((info) {
+      setState(() {
+        _wifiP2PInfo = info;
+        if (info.isConnected) {
+          _connectionStatus =
+              info.isGroupOwner ? 'Hosting Group' : 'Connected to Host';
+        } else {
+          _connectionStatus = 'Disconnected';
+        }
+      });
+    });
 
-  // ── Peer discovery bottom-sheet ───────────────────────────────────────────
-  Future<void> _showPeerDiscovery() async {
-    setState(() => _discoveredPeers.clear());
-    await _p2p.discoverPeers();
+    _p2p.streamPeers().listen((peers) {
+      setState(() => _peers = peers);
+    });
 
-    // Listen for discovered peers and populate the list
-    _p2p.streamPeers().take(1).listen((peers) {
-      if (mounted) {
+    // Handle incoming P2P messages and locations
+    _p2p.onMessageReceived = (text, lat, lng) async {
+      _latency.onP2pReceived();
+
+      // Update peer location if provided
+      if (lat != null && lng != null) {
+        const ip = 'Peer'; // In a real app, map this to actual peer IP
         setState(() {
-          _discoveredPeers.clear();
-          _discoveredPeers.addAll(peers);
+          _peerLocations[ip] = PeerLocation(
+            ip,
+            LatLng(lat, lng),
+            text,
+            DateTime.now(),
+          );
         });
       }
-    });
 
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _cardDark,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      // Synthesize and play
+      final audio = SpeechService().synthesizeSpeech(text);
+      if (audio.isNotEmpty) {
+        if (_isEmergencyMode) {
+          await TtsPlayer().playAlert(audio);
+        } else {
+          await TtsPlayer().playSpeech(audio);
+        }
+        _latency.onTtsPlayed();
+      }
+    };
+  }
+
+  Future<void> _initLocation() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return;
+    }
+    if (permission == LocationPermission.deniedForever) return;
+
+    _currentPosition = await Geolocator.getCurrentPosition();
+    if (mounted) setState(() {});
+
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
       ),
-      builder: (_) => _PeerDiscoverySheet(
-        peers: _discoveredPeers,
-        onConnect: (address) async {
-          Navigator.pop(context);
-          await _p2p.connectToDevice(address);
-        },
-      ),
-    );
+    ).listen((Position position) {
+      if (mounted) setState(() => _currentPosition = position);
+    });
   }
 
   @override
   void dispose() {
-    _transcriptSub?.cancel();
-    _probabilitySub?.cancel();
-    _latencySub?.cancel();
+    _positionStream?.cancel();
     _stt.dispose();
     _p2p.dispose();
-    _ttsPlayer.dispose();
-    _latency.dispose();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
+  void _toggleEmergencyMode() {
+    setState(() {
+      _isEmergencyMode = !_isEmergencyMode;
+    });
+    if (_isEmergencyMode) {
+      EmergencyVolume.activate();
+    } else {
+      EmergencyVolume.deactivate();
+    }
+  }
+
+  void _showDiscoverySheet() {
+    _p2p.discoverPeers();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Discovered Peers',
+                style: GoogleFonts.manrope(
+                    fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            if (_peers.isEmpty) const Text('Searching for VaniLink devices...'),
+            ..._peers.map((p) => ListTile(
+                  leading: const CircleAvatar(
+                      backgroundColor: Colors.black,
+                      child: Icon(Icons.wifi, color: Colors.white)),
+                  title: Text(p.deviceName,
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                  subtitle: Text(p.deviceAddress),
+                  onTap: () {
+                    _p2p.connectToDevice(p.deviceAddress);
+                    Navigator.pop(context);
+                  },
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── UI ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bgLight,
+      backgroundColor: const Color(0xFFF3F4F6),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 16),
-              _buildHeroCard(),
-              const SizedBox(height: 12),
-              _buildMetricsRow(),
-              const SizedBox(height: 12),
-              Expanded(child: _buildMessageLedger()),
-              _buildVadBar(),
-              const SizedBox(height: 16),
-              _buildPttButton(),
-              const SizedBox(height: 8),
-              _buildBottomNav(),
-            ],
-          ),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: _showMap ? _buildMapView() : _buildDashboardView(),
         ),
       ),
     );
   }
 
-  // ── Header ────────────────────────────────────────────────────────────────
-  Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'VaniLink P2P',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[600],
-                letterSpacing: 1.2,
-              ),
-            ),
-            Text(
-              'Secure Transceiver',
-              style: GoogleFonts.inter(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: _textMain,
-              ),
-            ),
-          ],
-        ),
-        Row(
-          children: [
-            // Emergency mode toggle
-            GestureDetector(
-              onTap: _toggleEmergency,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _isEmergencyMode ? _accentOrange : Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 8,
-                    )
-                  ],
-                ),
-                child: Icon(
-                  Icons.campaign_rounded,
-                  color: _isEmergencyMode ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // P2P connect button
-            GestureDetector(
-              onTap: _showPeerDiscovery,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 8,
-                    )
-                  ],
-                ),
-                child: Icon(
-                  _isConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
-                  color: _isConnected ? _cardDark : _accentOrange,
-                  size: 20,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // ── Hero live-transcript card ─────────────────────────────────────────────
-  Widget _buildHeroCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _cardDark,
-        borderRadius: BorderRadius.circular(28),
-      ),
+  Widget _buildDashboardView() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Top Bar
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Language selector
-              DropdownButton<AppLanguage>(
-                value: _selectedLanguage,
-                dropdownColor: _cardDark,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                underline: const SizedBox(),
-                items: AppLanguage.values.map((lang) {
-                  return DropdownMenuItem(
-                    value: lang,
-                    child: Text(lang.displayName),
-                  );
-                }).toList(),
-                onChanged: _onLanguageChanged,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black12, width: 2),
+                ),
+                child: const Icon(Icons.menu, color: Colors.black),
               ),
-              Icon(
-                _isRecording ? Icons.mic_rounded : Icons.mic_none_rounded,
-                color: _isRecording ? _accentOrange : Colors.white60,
+              Column(
+                children: [
+                  Text('VaniLink',
+                      style: GoogleFonts.manrope(
+                          fontSize: 14, color: Colors.black54)),
+                  Text(_connectionStatus,
+                      style: GoogleFonts.manrope(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: _wifiP2PInfo?.isConnected == true
+                              ? Colors.green
+                              : Colors.black)),
+                ],
+              ),
+              GestureDetector(
+                onTap: _showDiscoverySheet,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black, width: 2),
+                  ),
+                  child: const Icon(Icons.share, color: Colors.black),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            _isInitializing ? 'Initializing models…' : _liveTranscript,
-            style: GoogleFonts.inter(
+          const SizedBox(height: 32),
+          Text('Communicate\nand coordinate',
+              style: GoogleFonts.manrope(
+                  fontSize: 32, fontWeight: FontWeight.bold, height: 1.1)),
+          const SizedBox(height: 24),
+
+          // Transcript Card (Mint Green)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFFBBE5D9),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Live Transcript',
+                        style: GoogleFonts.manrope(
+                            fontSize: 18, fontWeight: FontWeight.w600)),
+                    Icon(
+                        _stt.isListening ? Icons.mic : Icons.mic_none,
+                        color: _stt.isListening ? Colors.red : Colors.black54),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _liveTranscript.isEmpty
+                      ? 'Hold the PTT button to speak...'
+                      : _liveTranscript,
+                  style: GoogleFonts.manrope(
+                      fontSize: 16, color: Colors.black87),
+                ),
+                const SizedBox(height: 24),
+                // VAD Bar
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: LinearProgressIndicator(
+                    value: _speechProb,
+                    backgroundColor: Colors.white54,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.black),
+                    minHeight: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Team / Peers Section
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
               color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w500,
-              height: 1.4,
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.hub_outlined, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Your Network',
+                        style: GoogleFonts.manrope(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('Invite peers for offline comms',
+                    style: GoogleFonts.manrope(
+                        fontSize: 14, color: Colors.black54)),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: _showDiscoverySheet,
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.black12, width: 2),
+                        ),
+                        child: const Icon(Icons.add),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    if (_wifiP2PInfo?.isConnected == true)
+                      const CircleAvatar(
+                        radius: 25,
+                        backgroundColor: Colors.black,
+                        child: Icon(Icons.person, color: Colors.white),
+                      )
+                  ],
+                ),
+              ],
             ),
           ),
-          if (_initError.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              '⚠️ $_initError',
-              style: const TextStyle(color: _accentOrange, fontSize: 11),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Icon(Icons.bolt_rounded, color: _accentOrange, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                _isRecording ? 'Capturing voice…' : 'Ready to transmit',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12),
+          const SizedBox(height: 16),
+
+          // Map Preview Card (Black)
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _showMap = true),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(32),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.explore_outlined,
+                                color: Colors.white),
+                            const SizedBox(width: 8),
+                            Text('View on the map',
+                                style: GoogleFonts.manrope(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white)),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1),
+                          ),
+                          child: const Icon(Icons.share,
+                              color: Colors.white, size: 16),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Tracking Peers',
+                                style: GoogleFonts.manrope(
+                                    fontSize: 14, color: Colors.white54)),
+                            Text('${_peerLocations.length} active',
+                                style: GoogleFonts.manrope(
+                                    fontSize: 16, color: Colors.white)),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.white),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text('View >',
+                              style: GoogleFonts.manrope(color: Colors.white)),
+                        ),
+                      ],
+                    )
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ── Metrics row ────────────────────────────────────────────────────────────
-  Widget _buildMetricsRow() {
-    final sttMs = _lastLatency?.sttLatencyMs;
-    final rtf = _lastLatency?.rtf;
-    return Row(
+  Widget _buildMapView() {
+    return Stack(
       children: [
-        Expanded(child: _metricCard(
-          label: 'STT Latency',
-          value: sttMs != null ? '${sttMs}ms' : '—',
-          dark: false,
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _metricCard(
-          label: 'RTF',
-          value: rtf != null ? rtf.toStringAsFixed(2) : '—',
-          dark: true,
-        )),
+        // The Map
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _currentPosition != null
+                ? LatLng(
+                    _currentPosition!.latitude, _currentPosition!.longitude)
+                : const LatLng(20.5937, 78.9629), // Default India
+            initialZoom: 15.0,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.vanilink',
+            ),
+            MarkerLayer(
+              markers: [
+                // Current User
+                if (_currentPosition != null)
+                  Marker(
+                    point: LatLng(_currentPosition!.latitude,
+                        _currentPosition!.longitude),
+                    width: 40,
+                    height: 40,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                      child: const Icon(Icons.person,
+                          color: Colors.white, size: 20),
+                    ),
+                  ),
+                // Peers
+                ..._peerLocations.values.map((p) => Marker(
+                      point: p.position,
+                      width: 40,
+                      height: 40,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                        ),
+                        child: const Icon(Icons.headset,
+                            color: Colors.white, size: 20),
+                      ),
+                    )),
+              ],
+            ),
+          ],
+        ),
+
+        // Top Overlay
+        Positioned(
+          top: 16,
+          left: 16,
+          right: 16,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              GestureDetector(
+                onTap: () => setState(() => _showMap = false),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8)],
+                  ),
+                  child: const Icon(Icons.arrow_back, color: Colors.black),
+                ),
+              ),
+              // Latency pills
+              StreamBuilder<LatencyReport>(
+                stream: _latency.reportStream,
+                builder: (context, snap) {
+                  if (!snap.hasData) return const SizedBox();
+                  return Row(
+                    children: [
+                      _buildStatPill(
+                          Icons.speed, '${snap.data!.sttLatencyMs}ms',
+                          color: const Color(0xFFBBE5D9)),
+                      const SizedBox(width: 8),
+                      _buildStatPill(
+                          Icons.waves, snap.data!.rtf?.toStringAsFixed(2) ?? 'N/A',
+                          color: const Color(0xFFBBE5D9)),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+
+        // Bottom Controls (Pill shape)
+        Positioned(
+          bottom: 24,
+          left: 24,
+          right: 24,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(40),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Emergency Toggle
+                IconButton(
+                  icon: Icon(
+                    _isEmergencyMode ? Icons.warning : Icons.health_and_safety,
+                    color: _isEmergencyMode ? Colors.red : Colors.white54,
+                  ),
+                  onPressed: _toggleEmergencyMode,
+                ),
+
+                // Language Selector
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<AppLanguage>(
+                    dropdownColor: Colors.black87,
+                    value: _selectedLanguage,
+                    icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+                    style: GoogleFonts.manrope(color: Colors.white),
+                    onChanged: (AppLanguage? newValue) {
+                      if (newValue != null) {
+                        setState(() => _selectedLanguage = newValue);
+                        _stt.setLanguage(newValue);
+                        SpeechService().setTtsLanguage(newValue.code);
+                      }
+                    },
+                    items: AppLanguage.values.map((AppLanguage lang) {
+                      return DropdownMenuItem<AppLanguage>(
+                        value: lang,
+                        child: Text(lang.displayName),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
+                // PTT Button
+                GestureDetector(
+                  onTapDown: (_) {
+                    _latency.onSpeechStarted();
+                    _stt.startListening();
+                  },
+                  onTapUp: (_) => _stt.stopListening(),
+                  onTapCancel: () => _stt.stopListening(),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _isEmergencyMode ? Colors.red : Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.mic,
+                      color: _isEmergencyMode ? Colors.white : Colors.black,
+                      size: 28,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _metricCard({required String label, required String value, required bool dark}) {
+  Widget _buildStatPill(IconData icon, String text, {required Color color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: dark ? _accentOrange : Colors.white,
+        color: color,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(color: dark ? Colors.white70 : Colors.grey[500], fontSize: 11)),
-          const SizedBox(height: 4),
-          Text(value, style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: dark ? Colors.white : _textMain,
-          )),
-        ],
-      ),
-    );
-  }
-
-  // ── Message ledger ────────────────────────────────────────────────────────
-  Widget _buildMessageLedger() {
-    if (_messages.isEmpty) {
-      return Center(
-        child: Text(
-          'Messages will appear here',
-          style: TextStyle(color: Colors.grey[400], fontSize: 13),
-        ),
-      );
-    }
-    return ListView.builder(
-      reverse: true,
-      itemCount: _messages.length,
-      itemBuilder: (_, i) {
-        final msg = _messages[_messages.length - 1 - i];
-        return Align(
-          alignment: msg.isMine ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-            decoration: BoxDecoration(
-              color: msg.isMine ? _cardDark : Colors.white,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              msg.text,
-              style: TextStyle(
-                color: msg.isMine ? Colors.white : _textMain,
-                fontSize: 14,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ── VAD probability bar ───────────────────────────────────────────────────
-  Widget _buildVadBar() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
-      child: LinearProgressIndicator(
-        value: _speechProbability,
-        minHeight: 4,
-        backgroundColor: Colors.grey[200],
-        color: _isRecording ? _accentOrange : _cardDark,
-      ),
-    );
-  }
-
-  // ── PTT button ────────────────────────────────────────────────────────────
-  Widget _buildPttButton() {
-    return Center(
-      child: Column(
-        children: [
-          GestureDetector(
-            onTapDown: (_) => _onPttDown(),
-            onTapUp: (_) => _onPttUp(),
-            onPanEnd: (_) => _onPttUp(),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: _isRecording ? 92 : 104,
-              height: _isRecording ? 92 : 104,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _isEmergencyMode
-                    ? (_isRecording ? Colors.red[700] : _accentOrange)
-                    : (_isRecording ? _accentOrange : _cardDark),
-                boxShadow: [
-                  BoxShadow(
-                    color: (_isRecording ? _accentOrange : _cardDark)
-                        .withValues(alpha: 0.35),
-                    blurRadius: 24,
-                    spreadRadius: 4,
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Icon(
-                  _isEmergencyMode ? Icons.campaign_rounded : Icons.mic_rounded,
-                  color: Colors.white,
-                  size: 44,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _isEmergencyMode ? 'HOLD — EMERGENCY BROADCAST' : 'HOLD TO TRANSMIT',
-            style: TextStyle(
-              color: _isEmergencyMode ? _accentOrange : Colors.grey[500],
-              fontSize: 10,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Bottom nav ────────────────────────────────────────────────────────────
-  Widget _buildBottomNav() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      decoration: BoxDecoration(
-        color: _cardDark,
-        borderRadius: BorderRadius.circular(40),
-      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          IconButton(
-            icon: const Icon(Icons.grid_view_rounded, color: Colors.white70),
-            onPressed: () {},
-            tooltip: 'History',
-          ),
-          IconButton(
-            icon: const Icon(Icons.forum_rounded, color: Colors.white),
-            onPressed: () {},
-            tooltip: 'Messages',
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.settings_rounded,
-              color: _isEmergencyMode ? _accentOrange : Colors.white70,
-            ),
-            onPressed: _toggleEmergency,
-            tooltip: 'Emergency Mode',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Peer discovery bottom sheet
-// ─────────────────────────────────────────────────────────────────────────────
-class _PeerDiscoverySheet extends StatelessWidget {
-  final List<DiscoveredPeers> peers;
-  final void Function(String address) onConnect;
-
-  const _PeerDiscoverySheet({
-    required this.peers,
-    required this.onConnect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Nearby VaniLink Devices',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (peers.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Center(
-                child: Text(
-                  'Scanning… ensure the other device has Wi-Fi Direct enabled.',
-                  style: TextStyle(color: Colors.white60, fontSize: 13),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
-          else
-            ...peers.map((peer) => ListTile(
-                  leading: const Icon(Icons.smartphone_rounded, color: Colors.white70),
-                  title: Text(
-                    peer.deviceName,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  subtitle: Text(
-                    peer.deviceAddress,
-                    style: const TextStyle(color: Colors.white54, fontSize: 11),
-                  ),
-                  trailing: TextButton(
-                    onPressed: () => onConnect(peer.deviceAddress),
-                    child: const Text('Connect', style: TextStyle(color: Color(0xFFD95338))),
-                  ),
-                )),
-          const SizedBox(height: 8),
+          Icon(icon, size: 14, color: Colors.black87),
+          const SizedBox(width: 4),
+          Text(text,
+              style: GoogleFonts.manrope(
+                  fontSize: 12, fontWeight: FontWeight.bold)),
         ],
       ),
     );

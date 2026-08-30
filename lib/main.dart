@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'ui/walkie_talkie_screen.dart';
+import 'package:vanilink/ui/walkie_talkie_screen.dart';
 import 'speech_service.dart';
 
 void main() async {
