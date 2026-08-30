@@ -71,31 +71,53 @@ class SpeechService {
       final modelPath = await _extractAsset('assets/models/tts/$langCode/model.onnx');
       final tokensPath = await _extractAsset('assets/models/tts/$langCode/tokens.txt');
       
-      // 1. EXTRACT ESPEAK DATA
       final dir = await getApplicationCacheDirectory();
       final espeakDataDir = Directory('${dir.path}/espeak-ng-data');
       
-      if (!espeakDataDir.existsSync()) {
-        print('📦 Extracting espeak-ng-data.zip...');
-        // Path adjusted to match your screenshot
-        final byteData = await rootBundle.load('assets/models/tts/en/espeak-ng-data.zip');
-        final bytes = byteData.buffer.asUint8List();
-        final archive = ZipDecoder().decodeBytes(bytes);
-        
-        for (final file in archive) {
-          final filename = file.name;
-          if (file.isFile) {
-            final outFile = File('${dir.path}/$filename');
-            await outFile.parent.create(recursive: true);
-            await outFile.writeAsBytes(file.content as List<int>);
-          } else {
-            await Directory('${dir.path}/$filename').create(recursive: true);
-          }
+      // 1. FORCE CLEAN EXTRACTION
+      // Delete the old corrupted extraction if it exists so we can do it right
+      if (espeakDataDir.existsSync()) {
+        espeakDataDir.deleteSync(recursive: true);
+      }
+      
+      print('📦 Extracting espeak-ng-data.zip securely...');
+      final byteData = await rootBundle.load('assets/models/tts/en/espeak-ng-data.zip');
+      final bytes = byteData.buffer.asUint8List();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      
+      for (final file in archive) {
+        String filename = file.name;
+        // Normalize the path: strip the root folder name if the zip included it
+        if (filename.startsWith('espeak-ng-data/')) {
+          filename = filename.replaceFirst('espeak-ng-data/', '');
         }
-        print('✅ eSpeak data extracted successfully');
+        if (filename.isEmpty) continue;
+
+        final outFile = File('${espeakDataDir.path}/$filename');
+        if (file.isFile) {
+          await outFile.parent.create(recursive: true);
+          await outFile.writeAsBytes(file.content as List<int>);
+        } else {
+          await Directory('${espeakDataDir.path}/$filename').create(recursive: true);
+        }
       }
 
-      // 2. INITIALIZE TTS ENGINE
+      // 2. PRE-FLIGHT CHECK (Prevent C++ Crash)
+      final testPhontab = File('${espeakDataDir.path}/phontab');
+      final testModel = File(modelPath);
+      
+      if (!testPhontab.existsSync()) {
+        print('❌ FATAL: espeak data extracted incorrectly. Phontab missing!');
+        return; // Abort before C++ crashes the app
+      }
+      if (testModel.lengthSync() < 1000) {
+        print('❌ FATAL: The TTS .onnx model is 0 bytes or corrupted!');
+        return; // Abort before C++ crashes the app
+      }
+
+      print('✅ Pre-flight check passed. Booting C++ TTS Engine...');
+
+      // 3. INITIALIZE TTS ENGINE
       _ttsEngine = sherpa_onnx.OfflineTts(
         sherpa_onnx.OfflineTtsConfig(
           model: sherpa_onnx.OfflineTtsModelConfig(
@@ -104,12 +126,13 @@ class SpeechService {
               tokens: tokensPath,
               dataDir: espeakDataDir.path,
             ),
-            numThreads: 1, // Changed to 1 to reduce thermal throttling on mid-range phones
+            numThreads: 1, 
             debug: false,
-            provider: 'cpu', // <--- THIS PREVENTS THE CRASH
+            provider: 'cpu', 
           ),
         ),
       );
+      
       _ttsReady = true;
       print('✅ TTS ($langCode) initialized successfully');
     } catch (e) {
