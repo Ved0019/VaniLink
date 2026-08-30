@@ -3,9 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
+import 'package:archive/archive_io.dart'; // Required for unzip
 
 /// Singleton service that owns STT + TTS sherpa-onnx engines.
-/// Multi-language TTS is lazy-loaded per language to minimize RAM.
 class SpeechService {
   static final SpeechService _instance = SpeechService._internal();
   factory SpeechService() => _instance;
@@ -24,16 +24,13 @@ class SpeechService {
   // Initialization
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Initializes STT (IndicConformer) and the default English TTS model.
   Future<void> initModels() async {
     sherpa_onnx.initBindings();
 
     // ── STT ──────────────────────────────────────────────────────────────
     try {
-      final sttModelPath =
-          await _extractAsset('assets/models/stt/indic/model.int8.onnx');
-      final sttTokensPath =
-          await _extractAsset('assets/models/stt/indic/tokens.txt');
+      final sttModelPath = await _extractAsset('assets/models/stt/indic/model.int8.onnx');
+      final sttTokensPath = await _extractAsset('assets/models/stt/indic/tokens.txt');
 
       _sttEngine = sherpa_onnx.OfflineRecognizer(
         sherpa_onnx.OfflineRecognizerConfig(
@@ -51,7 +48,6 @@ class SpeechService {
       _sttReady = true;
       print('✅ STT (IndicConformer) initialized successfully');
     } catch (e) {
-      // STT unavailable — app degrades gracefully
       print('⚠️ STT initialization failed. Offline transcription unavailable: $e');
       _sttReady = false;
     }
@@ -60,8 +56,6 @@ class SpeechService {
     await _loadTts('en');
   }
 
-  /// Lazy-loads a TTS engine for the given ISO language code.
-  /// Unloads the previous engine if the language changes (saves RAM).
   Future<void> setTtsLanguage(String langCode) async {
     if (_currentTtsLang == langCode && _ttsReady) return;
     await _loadTts(langCode);
@@ -74,45 +68,53 @@ class SpeechService {
     _currentTtsLang = langCode;
 
     try {
-      final modelPath =
-          await _extractAsset('assets/models/tts/$langCode/model.onnx');
-      final tokensPath =
-          await _extractAsset('assets/models/tts/$langCode/tokens.txt');
+      final modelPath = await _extractAsset('assets/models/tts/$langCode/model.onnx');
+      final tokensPath = await _extractAsset('assets/models/tts/$langCode/tokens.txt');
       
-      // Try to locate eSpeak-ng data directory
-      // First check if espeak-ng-data directory exists in cache
+      // 1. EXTRACT ESPEAK DATA
       final dir = await getApplicationCacheDirectory();
       final espeakDataDir = Directory('${dir.path}/espeak-ng-data');
       
-      String espeakDataPath = '';
-      if (espeakDataDir.existsSync()) {
-        espeakDataPath = espeakDataDir.path;
-        print('✅ Using existing eSpeak-ng data: $espeakDataPath');
-      } else {
-        print('⚠️ eSpeak-ng data not found at ${espeakDataDir.path}');
-        print('   Tip: Extract espeak-ng-data.zip to: ${espeakDataDir.path}');
+      if (!espeakDataDir.existsSync()) {
+        print('📦 Extracting espeak-ng-data.zip...');
+        // Path adjusted to match your screenshot
+        final byteData = await rootBundle.load('assets/models/tts/en/espeak-ng-data.zip');
+        final bytes = byteData.buffer.asUint8List();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        
+        for (final file in archive) {
+          final filename = file.name;
+          if (file.isFile) {
+            final outFile = File('${dir.path}/$filename');
+            await outFile.parent.create(recursive: true);
+            await outFile.writeAsBytes(file.content as List<int>);
+          } else {
+            await Directory('${dir.path}/$filename').create(recursive: true);
+          }
+        }
+        print('✅ eSpeak data extracted successfully');
       }
 
+      // 2. INITIALIZE TTS ENGINE
       _ttsEngine = sherpa_onnx.OfflineTts(
         sherpa_onnx.OfflineTtsConfig(
           model: sherpa_onnx.OfflineTtsModelConfig(
             vits: sherpa_onnx.OfflineTtsVitsModelConfig(
               model: modelPath,
               tokens: tokensPath,
-              dataDir: espeakDataPath.isNotEmpty ? espeakDataPath : '',
+              dataDir: espeakDataDir.path,
             ),
-            numThreads: 2,
+            numThreads: 1, // Changed to 1 to reduce thermal throttling on mid-range phones
             debug: false,
+            provider: 'cpu', // <--- THIS PREVENTS THE CRASH
           ),
         ),
       );
       _ttsReady = true;
       print('✅ TTS ($langCode) initialized successfully');
     } catch (e) {
-      // TTS unavailable for this language — not fatal
       print('⚠️ TTS initialization failed for language: $langCode');
       print('   Error: $e');
-      print('   See ONNX_MODEL_SETUP.md for model download instructions');
       _ttsReady = false;
     }
   }
@@ -121,7 +123,6 @@ class SpeechService {
   // Inference
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Transcribes raw 16 kHz PCM bytes to text.
   String transcribeAudio(Uint8List rawBytes, {int sampleRate = 16000}) {
     if (!_sttReady || _sttEngine == null) {
       throw Exception('STT engine not initialized');
@@ -135,11 +136,9 @@ class SpeechService {
     return result.text.trim();
   }
 
-  /// Converts text to Float32 audio samples ready for [TtsPlayer].
-  /// Returns an empty list if TTS is not initialized (graceful degradation).
   Float32List synthesizeSpeech(String text, {double speed = 1.0}) {
     if (!_ttsReady || _ttsEngine == null) {
-      return Float32List(0); // Graceful degradation
+      return Float32List(0);
     }
     final audio = _ttsEngine!.generate(text: text, sid: 0, speed: speed);
     return audio.samples;
@@ -151,7 +150,11 @@ class SpeechService {
 
   Future<String> _extractAsset(String assetPath) async {
     final dir = await getApplicationCacheDirectory();
-    final file = File('${dir.path}/${assetPath.split('/').last}');
+    
+    // FIX: Replace slashes with underscores so tokens.txt from STT and TTS don't overwrite each other!
+    final safeFileName = assetPath.replaceAll('/', '_'); 
+    final file = File('${dir.path}/$safeFileName');
+    
     if (!file.existsSync()) {
       final data = await rootBundle.load(assetPath);
       await file.writeAsBytes(data.buffer.asUint8List());

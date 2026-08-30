@@ -53,3 +53,4 @@ flutter:
     - assets/models/tts/te/
     - assets/models/tts/or/
     - assets/models/tts/bn/
+    - assets/models/tts/en/espeak-ng-data.zip
