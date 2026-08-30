@@ -225,163 +225,165 @@ class _EditorialWalkieTalkieScreenState
     );
   }
 
-  Widget _buildDashboardView() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Top Bar
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.black12, width: 2),
-                ),
-                child: const Icon(Icons.menu, color: Colors.black),
-              ),
-              Column(
-                children: [
-                  Text('VaniLink',
-                      style: GoogleFonts.manrope(
-                          fontSize: 14, color: Colors.black54)),
-                  Text(_connectionStatus,
-                      style: GoogleFonts.manrope(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: _wifiP2PInfo?.isConnected == true
-                              ? Colors.green
-                              : Colors.black)),
-                ],
-              ),
-              GestureDetector(
-                onTap: _showDiscoverySheet,
-                child: Container(
+ Widget _buildDashboardView() {
+    return SingleChildScrollView( // 1. Added SingleChildScrollView to prevent overflow
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Bar
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.black, width: 2),
+                    border: Border.all(color: Colors.black12, width: 2),
                   ),
-                  child: const Icon(Icons.share, color: Colors.black),
+                  child: const Icon(Icons.menu, color: Colors.black),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          Text('Communicate\nand coordinate',
-              style: GoogleFonts.manrope(
-                  fontSize: 32, fontWeight: FontWeight.bold, height: 1.1)),
-          const SizedBox(height: 24),
-
-          // Transcript Card (Mint Green)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFFBBE5D9),
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Column(
                   children: [
-                    Text('Live Transcript',
+                    Text('VaniLink',
                         style: GoogleFonts.manrope(
-                            fontSize: 18, fontWeight: FontWeight.w600)),
-                    Icon(
-                        _stt.isListening ? Icons.mic : Icons.mic_none,
-                        color: _stt.isListening ? Colors.red : Colors.black54),
+                            fontSize: 14, color: Colors.black54)),
+                    Text(_connectionStatus,
+                        style: GoogleFonts.manrope(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: _wifiP2PInfo?.isConnected == true
+                                ? Colors.green
+                                : Colors.black)),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  _liveTranscript.isEmpty
-                      ? 'Hold the PTT button to speak...'
-                      : _liveTranscript,
-                  style: GoogleFonts.manrope(
-                      fontSize: 16, color: Colors.black87),
-                ),
-                const SizedBox(height: 24),
-                // VAD Bar
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: LinearProgressIndicator(
-                    value: _speechProb,
-                    backgroundColor: Colors.white54,
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(Colors.black),
-                    minHeight: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Team / Peers Section
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.hub_outlined, size: 20),
-                    const SizedBox(width: 8),
-                    Text('Your Network',
-                        style: GoogleFonts.manrope(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text('Invite peers for offline comms',
-                    style: GoogleFonts.manrope(
-                        fontSize: 14, color: Colors.black54)),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: _showDiscoverySheet,
-                      child: Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.black12, width: 2),
-                        ),
-                        child: const Icon(Icons.add),
-                      ),
+                GestureDetector(
+                  onTap: _showDiscoverySheet,
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.black, width: 2),
                     ),
-                    const SizedBox(width: 12),
-                    if (_wifiP2PInfo?.isConnected == true)
-                      const CircleAvatar(
-                        radius: 25,
-                        backgroundColor: Colors.black,
-                        child: Icon(Icons.person, color: Colors.white),
-                      )
-                  ],
+                    child: const Icon(Icons.share, color: Colors.black),
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 32),
+            Text('Communicate\nand coordinate',
+                style: GoogleFonts.manrope(
+                    fontSize: 32, fontWeight: FontWeight.bold, height: 1.1)),
+            const SizedBox(height: 24),
 
-          // Map Preview Card (Black)
-          Expanded(
-            child: GestureDetector(
+            // Transcript Card (Mint Green)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFFBBE5D9),
+                borderRadius: BorderRadius.circular(32),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Live Transcript',
+                          style: GoogleFonts.manrope(
+                              fontSize: 18, fontWeight: FontWeight.w600)),
+                      Icon(
+                          _stt.isListening ? Icons.mic : Icons.mic_none,
+                          color: _stt.isListening ? Colors.red : Colors.black54),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _liveTranscript.isEmpty
+                        ? 'Hold the PTT button to speak...'
+                        : _liveTranscript,
+                    style: GoogleFonts.manrope(
+                        fontSize: 16, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 24),
+                  // VAD Bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: LinearProgressIndicator(
+                      value: _speechProb,
+                      backgroundColor: Colors.white54,
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.black),
+                      minHeight: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Team / Peers Section
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(32),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.hub_outlined, size: 20),
+                      const SizedBox(width: 8),
+                      Text('Your Network',
+                          style: GoogleFonts.manrope(
+                              fontSize: 18, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text('Invite peers for offline comms',
+                      style: GoogleFonts.manrope(
+                          fontSize: 14, color: Colors.black54)),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      GestureDetector(
+                        onTap: _showDiscoverySheet,
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.black12, width: 2),
+                          ),
+                          child: const Icon(Icons.add),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      if (_wifiP2PInfo?.isConnected == true)
+                        const CircleAvatar(
+                          radius: 25,
+                          backgroundColor: Colors.black,
+                          child: Icon(Icons.person, color: Colors.white),
+                        )
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Map Preview Card (Black)
+            // 2. Removed the 'Expanded' widget and added a minHeight constraint
+            GestureDetector(
               onTap: () => setState(() => _showMap = true),
               child: Container(
                 width: double.infinity,
+                constraints: const BoxConstraints(minHeight: 140), 
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1A1A1A),
@@ -417,6 +419,7 @@ class _EditorialWalkieTalkieScreenState
                         ),
                       ],
                     ),
+                    const SizedBox(height: 24), // Added explicit spacing
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -448,8 +451,9 @@ class _EditorialWalkieTalkieScreenState
                 ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 24), // Padding at the very bottom
+          ],
+        ),
       ),
     );
   }
