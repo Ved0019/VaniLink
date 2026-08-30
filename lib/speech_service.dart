@@ -81,7 +81,7 @@ class SpeechService {
       }
       
       print('📦 Extracting espeak-ng-data.zip securely...');
-      final byteData = await rootBundle.load('assets/models/tts/en/espeak-ng-data.zip');
+      final byteData = await rootBundle.load('assets/models/tts/$langCode/espeak-ng-data.zip');
       final bytes = byteData.buffer.asUint8List();
       final archive = ZipDecoder().decodeBytes(bytes);
       
