@@ -10,7 +10,8 @@ import 'package:vanilink/services/vad_service.dart';
 /// Loads `assets/models/stt/english/model.onnx` + `tokens.txt`.
 /// Implements [SttEngineInterface] identically to [IndicConformerSttEngine].
 class VoskSttEngine implements SttEngineInterface {
-  final String modelAssetPath;
+  final String encoderAssetPath;
+  final String decoderAssetPath;
   final String tokensAssetPath;
   final int numThreads;
 
@@ -18,8 +19,9 @@ class VoskSttEngine implements SttEngineInterface {
   bool _isInitialized = false;
 
   VoskSttEngine({
-    this.modelAssetPath = 'assets/models/stt/english/model.onnx',
-    this.tokensAssetPath = 'assets/models/stt/english/tokens.txt',
+    this.encoderAssetPath = 'assets/models/stt/english/tiny.en-encoder.int8.onnx',
+    this.decoderAssetPath = 'assets/models/stt/english/tiny.en-decoder.int8.onnx',
+    this.tokensAssetPath = 'assets/models/stt/english/tiny.en-tokens.txt',
     this.numThreads = 2,
   });
 
@@ -41,13 +43,15 @@ class VoskSttEngine implements SttEngineInterface {
     if (_isInitialized) return;
 
     try {
-      final modelPath = await _extractAsset(modelAssetPath);
+      final encoderPath = await _extractAsset(encoderAssetPath);
+      final decoderPath = await _extractAsset(decoderAssetPath);
       final tokensPath = await _extractAsset(tokensAssetPath);
 
       final config = sherpa_onnx.OfflineRecognizerConfig(
         model: sherpa_onnx.OfflineModelConfig(
-          nemoCtc: sherpa_onnx.OfflineNemoEncDecCtcModelConfig(
-            model: modelPath,
+          whisper: sherpa_onnx.OfflineWhisperModelConfig(
+            encoder: encoderPath,
+            decoder: decoderPath,
           ),
           tokens: tokensPath,
           numThreads: numThreads,
