@@ -8,9 +8,9 @@ void main() async {
   // Initialize speech models (STT & TTS) on app startup
   try {
     await SpeechService().initModels();
-    print('✅ App initialized with speech models');
+    debugPrint('✅ App initialized with speech models');
   } catch (e) {
-    print('⚠️ Warning: Speech models not loaded: $e');
+    debugPrint('⚠️ Warning: Speech models not loaded: $e');
   }
   
   runApp(const VaniLinkApp());

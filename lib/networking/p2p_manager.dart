@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
 class P2PManager {
@@ -34,7 +35,7 @@ class P2PManager {
             maxConcurrentDownloads: 1,
             deleteOnError: true,
             onConnect: (name, address) {
-              print("Client connected to socket: $name $address");
+              debugPrint('Client connected to socket: $name $address');
             },
             transferUpdate: (transfer) {}, // Ignoring files for now
             receiveString: (req) {
@@ -48,7 +49,7 @@ class P2PManager {
             maxConcurrentDownloads: 1,
             deleteOnError: true,
             onConnect: (address) {
-              print("Connected to host socket: $address");
+              debugPrint('Connected to host socket: $address');
             },
             transferUpdate: (transfer) {}, // Ignoring files for now
             receiveString: (req) {
@@ -69,7 +70,7 @@ class P2PManager {
         onMessageReceived!(jsonMap['payload']);
       }
     } catch (e) {
-      print("Error decoding incoming P2P payload: $e");
+      debugPrint('Error decoding incoming P2P payload: $e');
     }
   }
 

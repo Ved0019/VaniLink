@@ -21,9 +21,8 @@ class LatencyReport {
   });
 
   /// Time from speech start → STT completion (ms)
-  int? get sttLatencyMs => sttCompleted != null
-      ? sttCompleted!.difference(speechStarted).inMilliseconds
-      : null;
+  int? get sttLatencyMs =>
+      sttCompleted?.difference(speechStarted).inMilliseconds;
 
   /// Time from P2P received → TTS audio started (ms)
   int? get ttsLatencyMs =>

@@ -62,10 +62,10 @@ class TtsPlayer {
     }
     final pcmBytes = int16.buffer.asUint8List();
 
-    final int numChannels = 1;
-    final int bitsPerSample = 16;
+    const int numChannels = 1;
+    const int bitsPerSample = 16;
     final int byteRate = sampleRate * numChannels * bitsPerSample ~/ 8;
-    final int blockAlign = numChannels * bitsPerSample ~/ 8;
+    const int blockAlign = numChannels * bitsPerSample ~/ 8;
     final int dataSize = pcmBytes.length;
     final int chunkSize = 36 + dataSize;
 
