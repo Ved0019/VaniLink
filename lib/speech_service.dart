@@ -18,41 +18,40 @@ class SpeechService {
   /// Initializes STT and TTS models from bundled assets
   Future<void> initModels() async {
     try {
+      // CRITICAL: Must initialize the sherpa-onnx C++ bindings first!
+      sherpa_onnx.initBindings();
+
       // Extract STT model from assets
       final sttModelPath = await _extractAsset('assets/models/stt/indic/model.int8.onnx');
       final sttTokensPath = await _extractAsset('assets/models/stt/indic/tokens.txt');
 
-      // Initialize STT Engine (Sherpa-ONNX OfflineRecognizer)
+      // Initialize STT Engine (Sherpa-ONNX NeMo CTC)
       try {
-        // Fix: OfflineRecognizer takes the config as a positional argument
         _sttEngine = sherpa_onnx.OfflineRecognizer(
           sherpa_onnx.OfflineRecognizerConfig(
             model: sherpa_onnx.OfflineModelConfig(
-              paraformer: sherpa_onnx.OfflineParaformerModelConfig(
+              nemoCtc: sherpa_onnx.OfflineNemoEncDecCtcModelConfig(
                 model: sttModelPath,
               ),
               tokens: sttTokensPath,
               numThreads: 1,
-              debug: false,
+              debug: true,
             ),
           ),
         );
         print('✅ STT model initialized successfully');
       } catch (e) {
         print('⚠️ STT model initialization failed: $e');
+        rethrow;
       }
 
       // Extract and Initialize TTS Engine (Sherpa-ONNX OfflineTts)
       try {
         final ttsModelPath = await _extractAsset('assets/models/tts/en/model.onnx');
         final ttsTokensPath = await _extractAsset('assets/models/tts/en/tokens.txt');
-        
-        // Extract espeak-ng-data zip
         final ttsDataZipPath = await _extractAsset('assets/models/tts/en/espeak-ng-data.zip');
-        // Provide the data dir path (this implies espeak-ng-data should be extracted to this directory if needed)
         final ttsDataDir = ttsDataZipPath.replaceAll('.zip', '');
 
-        // Fix: OfflineTts takes the config as a positional argument
         _ttsEngine = sherpa_onnx.OfflineTts(
           sherpa_onnx.OfflineTtsConfig(
             model: sherpa_onnx.OfflineTtsModelConfig(
