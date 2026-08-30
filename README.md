@@ -1,10 +1,10 @@
 # VaniLink
 
-iTantra is an offline, peer-to-peer Android walkie-talkie application built with Flutter. It uses on-device Indic speech recognition and speech synthesis, so audio can be processed locally without a cloud service.
+VaniLink is an offline, peer-to-peer Android walkie-talkie application built with Flutter. It uses on-device Indic speech recognition and speech synthesis, so audio can be processed locally without a cloud service.
 
 ## Product Vision
 
-iTantra is intended to become a fully offline, local-first neural transceiver for voice communication across 10 target languages: Hindi, Gujarati, Marathi, Kannada, Malayalam, Tamil, Telugu, Odia, Bengali, and English.
+VaniLink is intended to become a fully offline, local-first neural transceiver for voice communication across 10 target languages: Hindi, Gujarati, Marathi, Kannada, Malayalam, Tamil, Telugu, Odia, Bengali, and English.
 
 Instead of sending large voice recordings, the application processes speech on the device, sends compact text payloads over a local peer-to-peer connection, and synthesizes the text back into speech on the receiving phone. This approach is designed to improve privacy, reduce bandwidth usage, and keep communication available when cellular or internet infrastructure is unavailable.
 
@@ -34,7 +34,7 @@ Instead of sending large voice recordings, the application processes speech on t
 Application behavior belongs in `lib/`. The `android/` directory contains the native Android runner and Gradle configuration.
 
 ```text
-iTantra/
+VaniLink/
 |-- lib/
 |   |-- main.dart             # Flutter application entry point and UI
 |   `-- speech_service.dart   # Offline STT and TTS service
@@ -97,8 +97,8 @@ flutter doctor
 ## Copy the Repository
 
 ```bash
-git clone https://github.com/Ved0019/iTantra.git
-cd iTantra
+git clone https://github.com/Ved0019/VaniLink.git
+cd VaniLink
 ```
 
 To update an existing checkout later:
