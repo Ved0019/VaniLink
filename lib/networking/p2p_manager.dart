@@ -8,6 +8,9 @@ class P2PManager {
 
   final FlutterP2pConnection _p2p = FlutterP2pConnection();
   bool _isInitialized = false;
+
+  /// Exposes the underlying FlutterP2pConnection so callers can stream peers.
+  FlutterP2pConnection get p2p => _p2p;
   
   // Callback to handle incoming text payloads from the remote phone
   Function(String)? onMessageReceived;
@@ -74,6 +77,12 @@ class P2PManager {
   Future<void> discoverPeers() async {
     await _p2p.discover();
   }
+
+  /// Gets stream of discovered peers for UI updates
+  Stream streamPeers() => _p2p.streamPeers();
+
+  /// Gets stream of Wi-Fi P2P info for connection state
+  Stream streamWifiP2PInfo() => _p2p.streamWifiP2PInfo();
 
   /// Connects to a specific peer device address
   Future<bool> connectToDevice(String address) async {

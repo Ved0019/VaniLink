@@ -17,14 +17,14 @@ void main() async {
 }
 
 class VaniLinkApp extends StatelessWidget {
-  const VaniLinkApp({Key? key}) : super(key: key);
+  const VaniLinkApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'VaniLink',
       theme: ThemeData.dark(useMaterial3: true),
-      home: EditorialWalkieTalkieScreen(),
+      home: const EditorialWalkieTalkieScreen(),
     );
   }
 }

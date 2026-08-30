@@ -34,8 +34,19 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Register bundled on-device quantized model assets
   assets:
-  - assets/models/stt/indic/
-  - assets/models/tts/en/
-  
+    # STT models
+    - assets/models/stt/indic/
+    - assets/models/stt/english/
+
+    # TTS models — one folder per language (lazy-loaded at runtime)
+    - assets/models/tts/en/
+    - assets/models/tts/hi/
+    - assets/models/tts/gu/
+    - assets/models/tts/mr/
+    - assets/models/tts/kn/
+    - assets/models/tts/ml/
+    - assets/models/tts/ta/
+    - assets/models/tts/te/
+    - assets/models/tts/or/
+    - assets/models/tts/bn/
