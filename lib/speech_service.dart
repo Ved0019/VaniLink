@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
-import 'package:archive/archive_io.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
 class SpeechService {
@@ -16,7 +15,86 @@ class SpeechService {
 
   bool get isInitialized => _isInitialized;
 
-  // ... (Keep your _extractAsset, _extractAndUnzip, and initModels methods here exactly as we wrote them earlier) ...
+  /// Initializes STT and TTS models from bundled assets
+  Future<void> initModels() async {
+    try {
+      // Extract STT model from assets
+      final sttModelPath = await _extractAsset('assets/models/stt/indic/model.int8.onnx');
+      final sttTokensPath = await _extractAsset('assets/models/stt/indic/tokens.txt');
+
+      // Initialize STT Engine (Sherpa-ONNX OfflineRecognizer)
+      try {
+        _sttEngine = sherpa_onnx.OfflineRecognizer(
+          config: sherpa_onnx.OfflineRecognizerConfig(
+            model: sherpa_onnx.OfflineModelConfig(
+              // NOTE: Update this configuration (e.g., transducer, paraformer, nemoCtc)
+              // depending on the exact architecture of your ONNX model.
+              // Assuming paraformer or a generic single-file model structure here:
+              paraformer: sherpa_onnx.OfflineParaformerModelConfig(
+                model: sttModelPath,
+              ),
+              tokens: sttTokensPath,
+              numThreads: 1,
+              debug: false,
+            ),
+          ),
+        );
+        print('✅ STT model initialized successfully');
+      } catch (e) {
+        print('⚠️ STT model initialization failed: $e');
+      }
+
+      // Extract and Initialize TTS Engine (Sherpa-ONNX OfflineTts)
+      try {
+        // Note: You must ensure these TTS files exist in your assets folder
+        // and are registered in pubspec.yaml. Modify paths as needed.
+        final ttsModelPath = await _extractAsset('assets/models/tts/model.int8.onnx');
+        final ttsTokensPath = await _extractAsset('assets/models/tts/tokens.txt');
+        final ttsLexiconPath = await _extractAsset('assets/models/tts/lexicon.txt'); // Usually required for TTS
+
+        _ttsEngine = sherpa_onnx.OfflineTts(
+          config: sherpa_onnx.OfflineTtsConfig(
+            model: sherpa_onnx.OfflineTtsModelConfig(
+              vits: sherpa_onnx.OfflineTtsVitsModelConfig(
+                model: ttsModelPath,
+                lexicon: ttsLexiconPath,
+                tokens: ttsTokensPath,
+              ),
+              numThreads: 1,
+              debug: false,
+            ),
+          ),
+        );
+        print('✅ TTS model initialized successfully');
+      } catch (e) {
+        print('⚠️ TTS model initialization failed: $e');
+      }
+
+      _isInitialized = true;
+      print('✅ Speech services initialized successfully');
+    } catch (e) {
+      print('❌ Error initializing speech models: $e');
+      rethrow;
+    }
+  }
+
+  /// Extracts asset from bundle to app cache directory
+  Future<String> _extractAsset(String assetPath) async {
+    try {
+      final appDocDir = await getApplicationCacheDirectory();
+      final file = File('${appDocDir.path}/${assetPath.split('/').last}');
+
+      // Only extract if file doesn't exist
+      if (!file.existsSync()) {
+        final data = await rootBundle.load(assetPath);
+        await file.writeAsBytes(data.buffer.asUint8List());
+      }
+
+      return file.path;
+    } catch (e) {
+      throw Exception('Failed to extract asset $assetPath: $e');
+    }
+  }
 
   /// Converts 16-bit PCM raw bytes into normalized Float32 samples for Sherpa-ONNX
   Float32List _convertBytesToFloat32(Uint8List bytes) {

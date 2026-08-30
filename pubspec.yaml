@@ -1,4 +1,4 @@
-name: itantra
+name: vanilink
 description: "Offline P2P Walkie-Talkie with on-device Indic STT and TTS"
 publish_to: 'none'
 version: 1.0.0+1
@@ -23,6 +23,7 @@ dependencies:
   # Permission handling at runtime
   permission_handler: ^11.3.1
   archive: ^4.2.0
+  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:

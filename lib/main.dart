@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'ui/walkie_talkie_screen.dart';
-// import 'speech_service.dart'; // Uncomment when ready to init
+import 'speech_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // TODO: Await SpeechService().initModels() here once models are downloaded
+  // Initialize speech models (STT & TTS) on app startup
+  try {
+    await SpeechService().initModels();
+    print('✅ App initialized with speech models');
+  } catch (e) {
+    print('⚠️ Warning: Speech models not loaded: $e');
+  }
   
   runApp(const VaniLinkApp());
 }
