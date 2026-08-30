@@ -1,53 +1,385 @@
-# VaniLink
+# VaniLink 📱
 
-VaniLink is an offline, peer-to-peer Android walkie-talkie application built with Flutter. It uses on-device Indic speech recognition and speech synthesis, so audio can be processed locally without a cloud service.
+**Offline P2P Walkie-Talkie with On-Device Indic Speech Recognition & Synthesis**
 
-## Product Vision
+VaniLink is an Android Flutter application that enables secure, private voice communication over local Wi-Fi Direct peer-to-peer networks. It converts speech to text locally on your device using on-device neural models, sends compact text payloads, and synthesizes speech back on the receiving device—all without internet connectivity.
 
-VaniLink is intended to become a fully offline, local-first neural transceiver for voice communication across 10 target languages: Hindi, Gujarati, Marathi, Kannada, Malayalam, Tamil, Telugu, Odia, Bengali, and English.
+---
 
-Instead of sending large voice recordings, the application processes speech on the device, sends compact text payloads over a local peer-to-peer connection, and synthesizes the text back into speech on the receiving phone. This approach is designed to improve privacy, reduce bandwidth usage, and keep communication available when cellular or internet infrastructure is unavailable.
+## 🎯 Product Vision
 
-### Planned user modes
+VaniLink is intended to become a fully **offline, local-first neural transceiver** for voice communication across **10+ target languages**: 
+- 🇮🇳 Hindi, Gujarati, Marathi, Kannada, Malayalam, Tamil, Telugu, Odia, Bengali
+- 🇬🇧 English
 
-- **Push-to-talk:** Microphone capture is controlled by a physical or virtual PTT button.
-- **Phone mode:** Hands-free monitoring uses voice activity detection to identify spoken sentences.
-- **Emergency alerts:** High-volume alert playback for distress messages, subject to Android audio and permission rules.
+**Key Philosophy:** Instead of sending large voice recordings, the application processes speech entirely on-device, sends compact text payloads over peer-to-peer connections, and synthesizes text back to speech on the receiving phone.
 
-## Features
+### **Planned User Modes**
 
-- Offline speech-to-text and text-to-speech with Sherpa-ONNX.
-- Wi-Fi Direct peer-to-peer communication.
-- Microphone recording and audio playback.
-- Runtime permission handling.
+| Mode | Description |
+|------|-------------|
+| **Push-to-Talk (PTT)** | Microphone capture controlled by button press (walkie-talkie style) |
+| **Phone Mode** | Hands-free monitoring with voice activity detection (VAD) |
+| **Emergency Alerts** | High-volume alert playback for distress messages |
 
-## Technology
+---
 
-- Flutter and Dart, with Dart SDK `^3.5.0`.
-- `sherpa_onnx` for local STT/TTS inference.
-- `record` and `audioplayers` for audio input and output.
-- `flutter_p2p_connection` for Wi-Fi Direct networking.
-- `permission_handler` for runtime permissions.
+## ✨ Current Features
 
-## Project Architecture
+- ✅ **Offline Speech-to-Text (STT)** with Sherpa-ONNX
+- ✅ **Real-time Voice Activity Detection (VAD)** with Silero
+- ✅ **Multi-language STT routing** (IndicConformer for Indian languages, Vosk for English)
+- ✅ **Wi-Fi Direct (P2P) Networking**
+- ✅ **Microphone Recording & Audio Playback**
+- ✅ **Runtime Permission Handling**
+- ✅ **Text-to-Speech Synthesis** (TTS via Piper/Sherpa-ONNX)
 
-Application behavior belongs in `lib/`. The `android/` directory contains the native Android runner and Gradle configuration.
+## 🛠️ Technology Stack
 
-```text
-VaniLink/
-|-- lib/
-|   |-- main.dart             # Flutter application entry point and UI
-|   `-- speech_service.dart   # Offline STT and TTS service
-|-- assets/
-|   `-- models/
-|       |-- stt/indic/        # STT ONNX model and tokens
-|       `-- tts/en/           # TTS ONNX model, tokens, and espeak data
-|-- test/
-|   `-- widget_test.dart      # Flutter widget tests
-|-- android/                  # Android project and Gradle files
-|-- pubspec.yaml              # Dependencies and asset registration
-`-- analysis_options.yaml     # Dart analyzer and lint configuration
+| Component | Technology |
+|-----------|-----------|
+| **Framework** | Flutter + Dart (SDK `^3.5.0`) |
+| **STT/TTS** | Sherpa-ONNX (quantized INT8 models) |
+| **VAD** | Silero VAD on-device |
+| **Audio I/O** | `record` + `audioplayers` |
+| **P2P Networking** | `flutter_p2p_connection` (Wi-Fi Direct) |
+| **Permissions** | `permission_handler` |
+| **File Management** | `path_provider`, `archive` |
+
+---
+
+## 📁 Project Architecture
+
+The application is organized into **service layers** with clear separation of concerns:
+
 ```
+VaniLink/
+├── lib/
+│   ├── main.dart                        # App entry point & root widget
+│   ├── speech_service.dart              # Legacy speech service (partial)
+│   │
+│   ├── ui/
+│   │   └── walkie_talkie_screen.dart   # Main UI: PTT button & transcription display
+│   │
+│   ├── services/                        # Core service layer
+│   │   ├── speech_to_text_service.dart # Master STT orchestrator (pipeline controller)
+│   │   ├── language_router.dart         # Language switching & engine routing
+│   │   ├── vad_service.dart             # Voice Activity Detection (Silero)
+│   │   ├── audio_capture_service.dart   # Microphone capture & 30ms chunking
+│   │   ├── stt_engine_interface.dart    # Abstract STT engine interface
+│   │   ├── indic_conformer_stt.dart     # IndicConformer INT8 (Indian languages)
+│   │   └── vosk_stt.dart                # Vosk STT (English)
+│   │
+│   ├── models/
+│   │   └── message_payload.dart         # Message data model (text + metadata)
+│   │
+│   ├── audio/
+│   │   └── microphone_handler.dart      # Low-level microphone recording
+│   │
+│   └── networking/
+│       └── p2p_manager.dart             # Wi-Fi Direct (P2P) connection manager
+│
+├── assets/
+│   └── models/
+│       ├── stt/
+│       │   ├── indic/                  # IndicConformer ONNX + tokens
+│       │   │   ├── model.int8.onnx    # Quantized Indic STT model
+│       │   │   └── tokens.txt          # Token vocabulary
+│       │   └── english/                # Vosk ONNX + tokens
+│       │       ├── model.onnx
+│       │       └── tokens.txt
+│       └── tts/
+│           ├── hi/                     # Hindi TTS (Piper)
+│           ├── en/                     # English TTS
+│           ├── mr/                     # Marathi TTS
+│           └── [ta, te, kn, ml, gu, pa, bn]/  # Other languages
+│
+├── test/
+│   └── widget_test.dart                # Flutter widget & integration tests
+│
+├── android/                            # Native Android project
+│   ├── app/
+│   │   └── src/main/
+│   │       ├── AndroidManifest.xml    # Permissions: RECORD_AUDIO, INTERNET, etc.
+│   │       └── java/com/example/itantra/MainActivity.kt
+│   └── build.gradle.kts
+│
+├── pubspec.yaml                        # Dependencies & asset registration
+├── pubspec.lock                        # Locked dependency versions
+├── analysis_options.yaml               # Dart linter configuration
+└── README.md                           # This file
+```
+
+---
+
+## 🏗️ System Architecture
+
+### **Speech-to-Text Pipeline (STT)**
+
+```
+┌──────────────────┐
+│  Microphone      │  16 kHz, 16-bit PCM, mono
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Audio Capture   │  30ms chunking (480 samples @ 16kHz)
+│  Service         │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Silero VAD      │  Real-time voice activity detection
+│  Service         │  Outputs: VAD state, speech probability
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Audio Buffer    │  Accumulates samples during speech
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Language Router │  Selects active STT engine based on language
+│                  │  English → Vosk, Indian → IndicConformer
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  STT Engine      │  Offline ONNX inference
+│  (Vosk or        │
+│   IndicConformer)│
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Transcribed     │  Text output (e.g., "नमस्ते")
+│  Text Stream     │
+└──────────────────┘
+```
+
+### **Key Service Classes**
+
+| Class | Purpose |
+|-------|---------|
+| **SpeechToTextService** | Master orchestrator; owns the entire STT pipeline |
+| **AudioCaptureService** | Reads from microphone, chunks into 30ms frames |
+| **VadService** | Silero VAD; detects speech start/end, buffers audio segments |
+| **SttLanguageRouter** | Routes speech segments to appropriate STT engine |
+| **IndicConformerSttEngine** | Transcribes Indian languages (Hindi, Tamil, etc.) |
+| **VoskSttEngine** | Transcribes English |
+| **P2PManager** | Manages Wi-Fi Direct connections & message transport |
+| **MessagePayload** | DTO for transcribed text + metadata |
+
+---
+
+## 🚀 Setup & Installation
+
+### **Prerequisites**
+
+- Flutter SDK: `^3.5.0`
+- Android SDK: API 21+ (recommended 33+)
+- Dart SDK: `^3.5.0`
+
+### **1. Clone the Repository**
+
+```bash
+git clone https://github.com/yourusername/VaniLink.git
+cd VaniLink
+```
+
+### **2. Install Flutter Dependencies**
+
+```bash
+flutter pub get
+```
+
+### **3. Download ONNX Models** ⚠️
+
+The app requires ONNX models to run. Place them in these directories:
+
+**STT Models:**
+```
+assets/models/stt/indic/
+├── model.int8.onnx      # IndicConformer quantized model
+└── tokens.txt           # Token vocabulary
+
+assets/models/stt/english/
+├── model.onnx           # Vosk English model
+└── tokens.txt
+```
+
+**TTS Models (Optional):**
+```
+assets/models/tts/hi/
+├── hi_model.onnx
+├── tokens.txt
+└── espeak_data.zip      # eSpeak phoneme data
+
+assets/models/tts/en/    # Similar structure for English
+...
+```
+
+Download models from:
+- **IndicConformer:** [Sherpa-ONNX Releases](https://github.com/k2-fsa/sherpa-onnx/releases)
+- **Vosk Models:** [Vosk Models](https://alphacephei.com/vosk/models)
+- **Piper TTS:** [Piper Releases](https://github.com/rhasspy/piper/releases)
+
+### **4. Build & Run**
+
+**On Emulator:**
+```bash
+flutter run -d emulator-5554
+```
+
+**On Physical Device:**
+```bash
+# Connect device via USB, enable Developer Mode
+flutter run
+```
+
+**Run Tests:**
+```bash
+flutter test
+```
+
+---
+
+## 📋 Android Permissions
+
+The app requires the following permissions (defined in `AndroidManifest.xml`):
+
+| Permission | Purpose |
+|-----------|---------|
+| `RECORD_AUDIO` | Microphone access for STT |
+| `MODIFY_AUDIO_SETTINGS` | Volume & audio routing control |
+| `INTERNET` | P2P socket communication |
+| `ACCESS_WIFI_STATE` | Query Wi-Fi state |
+| `CHANGE_WIFI_STATE` | Wi-Fi Direct setup |
+| `CHANGE_NETWORK_STATE` | Network connection management |
+| `ACCESS_FINE_LOCATION` | Wi-Fi Direct discovery (Android 10+) |
+| `NEARBY_WIFI_DEVICES` | Wi-Fi Direct discovery (Android 13+) |
+| `FOREGROUND_SERVICE` | Background audio processing |
+| `FOREGROUND_SERVICE_MICROPHONE` | Foreground service microphone access |
+
+All permissions are requested at runtime using `permission_handler`.
+
+---
+
+## 🧪 Testing
+
+### **Run All Tests**
+
+```bash
+flutter test
+```
+
+### **Run Specific Test**
+
+```bash
+flutter test test/widget_test.dart -v
+```
+
+### **Test Coverage**
+
+```bash
+flutter test --coverage
+```
+
+---
+
+## 📊 Component Responsibilities
+
+| Component | Responsibility |
+|-----------|-----------------|
+| **UI Layer** | `WalkieTalkieScreen`: displays transcription, PTT button, VAD visualization |
+| **Service Layer** | Orchestrates STT pipeline; exposes streams for real-time updates |
+| **Model Layer** | `MessagePayload` for P2P message serialization |
+| **Audio Layer** | Low-level microphone access & PCM chunking |
+| **Network Layer** | P2P connection management & message transport |
+
+---
+
+## 🔧 Development Workflow
+
+### **Code Style**
+
+- Format code: `dart format lib/`
+- Lint: `flutter analyze`
+- Follow Dart Style Guide & effective Dart
+
+### **Adding a New Language**
+
+1. Create model directory: `assets/models/stt/{language}/`
+2. Add ONNX model + tokens
+3. Update `AppLanguage` enum in `language_router.dart`
+4. Test language switching via `setLanguage()`
+
+### **Extending STT Engine**
+
+1. Implement `SttEngineInterface`
+2. Register in `SttLanguageRouter.activeEngine` switch
+3. Initialize in `SttLanguageRouter.init()`
+
+---
+
+## 🐛 Known Limitations
+
+- ⚠️ Sherpa-ONNX and Vosk models must be manually downloaded
+- ⚠️ P2P networking is a stub (TODO: implement)
+- ⚠️ TTS initialization is incomplete (requires model setup)
+- ⚠️ No persistent message history yet
+- ⚠️ No end-to-end encryption (planned feature)
+
+---
+
+## 📝 Roadmap
+
+- [ ] Implement full P2P Wi-Fi Direct communication
+- [ ] Complete TTS integration with Piper
+- [ ] Add message persistence (SQLite)
+- [ ] End-to-end encryption (Signal protocol)
+- [ ] Group chat support
+- [ ] Message read receipts
+- [ ] Audio visualization during recording
+- [ ] Language auto-detection
+- [ ] Emergency broadcast mode
+
+---
+
+## 📚 References
+
+- [Sherpa-ONNX Documentation](https://github.com/k2-fsa/sherpa-onnx)
+- [Flutter Documentation](https://flutter.dev/docs)
+- [Wi-Fi Direct Basics](https://developer.android.com/guide/topics/connectivity/wifip2p)
+- [Dart Language Guide](https://dart.dev/guides)
+
+---
+
+## 📄 License
+
+[Add your license here]
+
+---
+
+## 👥 Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit changes: `git commit -m "Add your feature"`
+4. Push to branch: `git push origin feature/your-feature`
+5. Open a Pull Request
+
+---
+
+## 💡 Questions & Support
+
+For questions, feature requests, or bug reports, please open an issue on the GitHub repository.
+
+---
+
+**Built with ❤️ for offline, privacy-first voice communication.**
 
 ### Runtime flow
 

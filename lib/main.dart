@@ -24,7 +24,7 @@ class VaniLinkApp extends StatelessWidget {
     return MaterialApp(
       title: 'VaniLink',
       theme: ThemeData.dark(useMaterial3: true),
-      home: const WalkieTalkieScreen(),
+      home: EditorialWalkieTalkieScreen(),
     );
   }
 }
