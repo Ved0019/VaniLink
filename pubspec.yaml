@@ -53,4 +53,15 @@ flutter:
     - assets/models/tts/te/
     - assets/models/tts/or/
     - assets/models/tts/bn/
+
+    # eSpeak-ng data for each language (required for TTS)
     - assets/models/tts/en/espeak-ng-data.zip
+    - assets/models/tts/hi/espeak-ng-data.zip
+    - assets/models/tts/gu/espeak-ng-data.zip
+    - assets/models/tts/mr/espeak-ng-data.zip
+    - assets/models/tts/kn/espeak-ng-data.zip
+    - assets/models/tts/ml/espeak-ng-data.zip
+    - assets/models/tts/ta/espeak-ng-data.zip
+    - assets/models/tts/te/espeak-ng-data.zip
+    - assets/models/tts/or/espeak-ng-data.zip
+    - assets/models/tts/bn/espeak-ng-data.zip

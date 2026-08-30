@@ -85,11 +85,25 @@ class AudioCaptureService {
   void processRawBytes(Uint8List rawBytes) {
     if (rawBytes.isEmpty) return;
 
+    // Ensure we start at an even offset for Int16 view
+    int startOffset = rawBytes.offsetInBytes;
+    if (startOffset % 2 != 0) {
+      startOffset++;
+    }
+    int lengthBytes = rawBytes.lengthInBytes - (startOffset - rawBytes.offsetInBytes);
+    // Make length even
+    if (lengthBytes % 2 != 0) {
+      lengthBytes--;
+    }
+    if (lengthBytes <= 0) {
+      return;
+    }
+
     // View raw bytes as 16-bit signed integers (little-endian PCM)
     final int16Samples = Int16List.view(
       rawBytes.buffer,
-      rawBytes.offsetInBytes,
-      rawBytes.lengthInBytes ~/ 2,
+      startOffset,
+      lengthBytes ~/ 2,
     );
 
     int inputIndex = 0;

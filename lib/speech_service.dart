@@ -79,6 +79,9 @@ class SpeechService {
       if (espeakDataDir.existsSync()) {
         espeakDataDir.deleteSync(recursive: true);
       }
+
+      // Recreate the directory after deletion
+      await espeakDataDir.create(recursive: true);
       
       print('📦 Extracting espeak-ng-data.zip securely...');
       final byteData = await rootBundle.load('assets/models/tts/$langCode/espeak-ng-data.zip');
