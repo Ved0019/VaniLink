@@ -74,16 +74,16 @@ extension AppLanguageExtension on AppLanguage {
 /// Router responsible for dispatching VAD speech segments to either
 /// Vosk (English) or IndicConformer INT8 (Indian Languages).
 class SttLanguageRouter {
-  final IndicConformerSttEngine _indicEngine;
-  final VoskSttEngine _voskEngine;
-
   AppLanguage _currentLanguage = AppLanguage.english;
+  late final IndicConformerSttEngine _indicEngine;
+  final VoskSttEngine _voskEngine;
 
   SttLanguageRouter({
     IndicConformerSttEngine? indicEngine,
     VoskSttEngine? voskEngine,
-  })  : _indicEngine = indicEngine ?? IndicConformerSttEngine(),
-        _voskEngine = voskEngine ?? VoskSttEngine();
+  })  : _voskEngine = voskEngine ?? VoskSttEngine() {
+    _indicEngine = indicEngine ?? IndicConformerSttEngine(language: _currentLanguage);
+  }
 
   /// Current selected language
   AppLanguage get currentLanguage => _currentLanguage;

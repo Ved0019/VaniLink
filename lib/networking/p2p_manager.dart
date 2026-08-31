@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class P2PManager {
   static final P2PManager _instance = P2PManager._internal();
@@ -9,25 +10,26 @@ class P2PManager {
 
   final FlutterP2pConnection _p2p = FlutterP2pConnection();
   bool _isInitialized = false;
+  bool _discoveryActive = false;
 
   /// Exposes the underlying FlutterP2pConnection so callers can stream peers.
   FlutterP2pConnection get p2p => _p2p;
-  
+
   // Callback to handle incoming text payloads and location from the remote phone
   Function(String text, double? lat, double? lng)? onMessageReceived;
 
   /// Initializes the Wi-Fi Direct framework and listeners
   Future<void> initialize() async {
     if (_isInitialized) return;
-    
+
     await _p2p.initialize();
-    
+
     // Listen to Wi-Fi Direct connection changes to establish a socket
     _p2p.streamWifiP2PInfo().listen((info) async {
       if (info.isConnected && info.groupFormed) {
         // Delay slightly to ensure IP addresses are fully resolved by Android
         await Future.delayed(const Duration(seconds: 1));
-        
+
         if (info.isGroupOwner) {
           await _p2p.startSocket(
             groupOwnerAddress: info.groupOwnerAddress,
@@ -61,6 +63,9 @@ class P2PManager {
     });
 
     _isInitialized = true;
+
+    // Start discovery automatically when initialized
+    await _startDiscovery();
   }
 
   void _handleReceivedString(String req) {
@@ -79,7 +84,52 @@ class P2PManager {
 
   /// Discovers nearby devices running VaniLink
   Future<void> discoverPeers() async {
-    await _p2p.discover();
+    await _startDiscovery();
+  }
+
+  /// Start peer discovery with permission checking
+  Future<void> _startDiscovery() async {
+    if (_discoveryActive) return;
+
+    try {
+      // Check and request location permission (required for Wi-Fi Direct on Android)
+      final locationStatus = await Permission.location.status;
+      if (!locationStatus.isGranted) {
+        final locationResult = await Permission.location.request();
+        if (!locationResult.isGranted) {
+          debugPrint('Location permission denied - required for P2P discovery');
+          return;
+        }
+      }
+
+      // Check and request nearby wifi permission (for Android 12+)
+      final nearbyWifiStatus = await Permission.nearbyWifiDevices.status;
+      if (!nearbyWifiStatus.isGranted) {
+        final nearbyWifiResult = await Permission.nearbyWifiDevices.request();
+        if (!nearbyWifiResult.isGranted) {
+          debugPrint('Nearby Wi-Fi permission denied - may affect P2P discovery');
+          // Continue anyway as this might not be strictly required on all versions
+        }
+      }
+
+      await _p2p.discover();
+      _discoveryActive = true;
+      debugPrint('P2P discovery started');
+    } catch (e) {
+      debugPrint('Failed to start P2P discovery: $e');
+    }
+  }
+
+  /// Stop peer discovery
+  Future<void> stopDiscovery() async {
+    if (!_discoveryActive) return;
+    try {
+      await _p2p.stopDiscovery();
+      _discoveryActive = false;
+      debugPrint('P2P discovery stopped');
+    } catch (e) {
+      debugPrint('Error stopping P2P discovery: $e');
+    }
   }
 
   /// Gets stream of discovered peers for UI updates
@@ -101,12 +151,12 @@ class P2PManager {
       if (lat != null) 'lat': lat,
       if (lng != null) 'lng': lng,
     });
-    
+
     _p2p.sendStringToSocket(payload);
   }
 
   void dispose() {
+    stopDiscovery();
     _p2p.removeGroup();
-    _p2p.stopDiscovery();
   }
 }

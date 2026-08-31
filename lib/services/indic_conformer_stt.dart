@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' hide SpeechSegment;
 import 'package:vanilink/services/stt_engine_interface.dart';
 import 'package:vanilink/services/vad_service.dart';
+import 'package:vanilink/services/language_router.dart';
 
 /// Offline IndicConformer INT8 STT engine powered by sherpa_onnx.
 ///
@@ -23,10 +24,10 @@ class IndicConformerSttEngine implements SttEngineInterface {
   String _detectedFormat = 'unknown';
 
   IndicConformerSttEngine({
-    this.modelAssetPath = 'assets/models/stt/indic/model.int8.onnx',
-    this.tokensAssetPath = 'assets/models/stt/indic/tokens.txt',
-    this.numThreads = 2,
-  });
+  required AppLanguage language,
+  this.numThreads = 2,
+})  : modelAssetPath = 'assets/models/stt/indic/${language.code}/model.int8.onnx',
+      tokensAssetPath = 'assets/models/stt/indic/tokens.txt';
 
   @override
   bool get isInitialized => _isInitialized;

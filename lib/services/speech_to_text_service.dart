@@ -99,9 +99,14 @@ class SpeechToTextService {
   /// Internal handler for VAD speech segments
   Future<void> _onSpeechSegmentDetected(SpeechSegment segment) async {
     try {
+      debugPrint('VAD detected speech segment: ${segment.samples.length} samples');
       final text = await _languageRouter.transcribeSegment(segment);
+      debugPrint('Transcription result: "$text"');
       if (text.isNotEmpty && !_transcriptionController.isClosed) {
         _transcriptionController.add(text);
+        debugPrint('Added transcription to stream: "$text"');
+      } else {
+        debugPrint('Empty transcription result, not adding to stream');
       }
     } catch (e) {
       debugPrint('SpeechToTextService transcription error: $e');
