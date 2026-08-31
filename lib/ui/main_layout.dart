@@ -289,7 +289,6 @@ class _MainLayoutState extends State<MainLayout> {
 
   Widget _buildHamburgerDrawer() {
     return Drawer(
-      backgroundColor: const Color(0xFF14171E),
       backgroundColor: Colors.white,
       child: SafeArea(
         child: Column(
@@ -300,7 +299,6 @@ class _MainLayoutState extends State<MainLayout> {
               child: Text(
                 'VaniLink\nNavigation',
                 style: GoogleFonts.manrope(
-                  color: Colors.white,
                   color: const Color(0xFF14171E),
                   fontSize: 32,
                   fontWeight: FontWeight.w900,
@@ -311,31 +309,23 @@ class _MainLayoutState extends State<MainLayout> {
             _buildDrawerItem(Icons.chat_bubble_outline_rounded, 'Communication', 0),
             _buildDrawerItem(Icons.map_outlined, 'Map Tracking', 1),
             _buildDrawerItem(Icons.hub_outlined, 'Network & Mesh', 2),
-            const Divider(color: Colors.white24, indent: 24, endIndent: 24, height: 40),
             const Divider(color: Colors.black12, indent: 24, endIndent: 24, height: 40),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: Text('Diagnostics (Local Loopback)', 
-                style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
                 style: GoogleFonts.manrope(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.bold)),
             ),
             const SizedBox(height: 8),
             SwitchListTile(
-              title: Text('Enable Mic Loopback', style: GoogleFonts.manrope(color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: Text('TTS plays your own STT output', style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12)),
               title: Text('Enable Mic Loopback', style: GoogleFonts.manrope(color: const Color(0xFF14171E), fontWeight: FontWeight.bold)),
               subtitle: Text('TTS plays your own STT output', style: GoogleFonts.manrope(color: Colors.black54, fontSize: 12)),
               value: _isLoopbackTestEnabled,
-              activeTrackColor: const Color(0xFFD4F651),
               activeTrackColor: const Color(0xFFFF6B4A),
               onChanged: (val) {
                 setState(() => _isLoopbackTestEnabled = val);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.volume_up, color: Color(0xFF38B6FF)),
-              title: Text('Test TTS Synthesis', style: GoogleFonts.manrope(color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: Text('Plays predefined test string', style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12)),
               leading: const Icon(Icons.volume_up, color: Color(0xFFFF6B4A)),
               title: Text('Test TTS Synthesis', style: GoogleFonts.manrope(color: const Color(0xFF14171E), fontWeight: FontWeight.bold)),
               subtitle: Text('Plays predefined test string', style: GoogleFonts.manrope(color: Colors.black54, fontSize: 12)),
@@ -350,14 +340,6 @@ class _MainLayoutState extends State<MainLayout> {
                 }
               },
             ),
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Text(
-                'Status: $_connectionStatus',
-                style: GoogleFonts.manrope(color: Colors.white54, fontSize: 14),
-              ),
-            ),
           ],
         ),
       ),
@@ -367,12 +349,10 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildDrawerItem(IconData icon, String title, int pageIndex) {
     final isSelected = _currentIndex == pageIndex;
     return ListTile(
-      leading: Icon(icon, color: isSelected ? const Color(0xFF38B6FF) : Colors.white70),
       leading: Icon(icon, color: isSelected ? const Color(0xFFFF6B4A) : Colors.black54),
       title: Text(
         title,
         style: GoogleFonts.manrope(
-          color: isSelected ? Colors.white : Colors.white70,
           color: isSelected ? const Color(0xFFFF6B4A) : const Color(0xFF14171E),
           fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
           fontSize: 18,
@@ -703,7 +683,6 @@ class _MainLayoutState extends State<MainLayout> {
 
   Widget _buildMapPage() {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 120.0),
       padding: const EdgeInsets.only(bottom: 20.0),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
@@ -762,7 +741,6 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildNetworkPage() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 140),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
