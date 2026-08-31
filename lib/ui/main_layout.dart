@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -23,6 +25,16 @@ class PeerLocation {
   PeerLocation(this.ip, this.position, this.lastMessage, this.timestamp);
 }
 
+class ChatMessage {
+  final String sender;
+  final String text;
+  final String lang;
+  final dynamic bytes;
+  final bool isIncoming;
+
+  ChatMessage(this.sender, this.text, this.lang, this.bytes, this.isIncoming);
+}
+
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
 
@@ -39,11 +51,15 @@ class _MainLayoutState extends State<MainLayout> {
   // Navigation
   final PageController _pageController = PageController(initialPage: 0);
   int _currentIndex = 0;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // State
   String _liveTranscript = '';
+  final List<ChatMessage> _messages = [];
   double _speechProb = 0.0;
   bool _isEmergencyMode = false;
+  bool _isLoopbackTestEnabled = false;
+
   AppLanguage _selectedLanguage = AppLanguage.english;
 
   // Connection State
@@ -71,13 +87,6 @@ class _MainLayoutState extends State<MainLayout> {
     // Listen to STT live partials
     _stt.transcriptionStream.listen((text) {
       if (mounted) setState(() => _liveTranscript = text);
-      if (text.isNotEmpty) {
-        _p2p.sendTranscript(
-          text,
-          lat: _currentPosition?.latitude,
-          lng: _currentPosition?.longitude,
-        );
-      }
     });
 
     // Listen to STT VAD probability for UI feedback
@@ -92,7 +101,7 @@ class _MainLayoutState extends State<MainLayout> {
           _wifiP2PInfo = info;
           if (info.isConnected) {
             _connectionStatus =
-                info.isGroupOwner ? 'Hosting Group' : 'Connected to Host';
+                info.isGroupOwner ? 'Group Owner' : 'Connected';
           } else {
             _connectionStatus = 'Disconnected';
           }
@@ -107,20 +116,20 @@ class _MainLayoutState extends State<MainLayout> {
     // Handle incoming P2P messages and locations
     _p2p.onMessageReceived = (text, lat, lng) async {
       _latency.onP2pReceived();
-
-      // Update peer location if provided
-      if (lat != null && lng != null) {
-        const ip = 'Peer'; // In a real app, map this to actual peer IP
-        if (mounted) {
-          setState(() {
-            _peerLocations[ip] = PeerLocation(
-              ip,
-              LatLng(lat, lng),
-              text,
-              DateTime.now(),
+      
+      const peerName = 'Peer'; 
+      if (mounted) {
+        setState(() {
+          _messages.insert(
+            0,
+            ChatMessage(peerName, text, _selectedLanguage.code.toUpperCase(), utf8.encode(text).length, true),
+          );
+          if (lat != null && lng != null) {
+            _peerLocations[peerName] = PeerLocation(
+              peerName, LatLng(lat, lng), text, DateTime.now(),
             );
-          });
-        }
+          }
+        });
       }
 
       // Synthesize and play
@@ -150,13 +159,8 @@ class _MainLayoutState extends State<MainLayout> {
     _currentPosition = await Geolocator.getCurrentPosition();
     if (mounted) setState(() {});
 
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((Position position) {
-      if (mounted) setState(() => _currentPosition = position);
+    _positionStream = Geolocator.getPositionStream().listen((pos) {
+      if (mounted) setState(() => _currentPosition = pos);
     });
   }
 
@@ -169,10 +173,45 @@ class _MainLayoutState extends State<MainLayout> {
     super.dispose();
   }
 
-  void _toggleEmergencyMode() {
+  void _onPttPress() {
+    HapticFeedback.heavyImpact();
     setState(() {
-      _isEmergencyMode = !_isEmergencyMode;
+      _liveTranscript = '';
     });
+    _latency.onSpeechStarted();
+    _stt.startListening();
+  }
+
+  void _onPttRelease() {
+    HapticFeedback.mediumImpact();
+    _stt.stopListening();
+    if (_liveTranscript.trim().isNotEmpty) {
+      final textToSend = _liveTranscript.trim();
+      setState(() {
+        _messages.insert(
+          0,
+          ChatMessage('You', textToSend, _selectedLanguage.code.toUpperCase(), utf8.encode(textToSend).length, false),
+        );
+        _liveTranscript = '';
+      });
+      _p2p.sendTranscript(
+        textToSend,
+        lat: _currentPosition?.latitude,
+        lng: _currentPosition?.longitude,
+      );
+
+      // Local Loopback Test
+      if (_isLoopbackTestEnabled) {
+        final audio = SpeechService().synthesizeSpeech(textToSend);
+        if (audio.isNotEmpty) {
+          TtsPlayer().playSpeech(audio);
+        }
+      }
+    }
+  }
+
+  void _toggleEmergencyMode() {
+    setState(() => _isEmergencyMode = !_isEmergencyMode);
     if (_isEmergencyMode) {
       EmergencyVolume.activate();
     } else {
@@ -193,382 +232,565 @@ class _MainLayoutState extends State<MainLayout> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Discovered Peers',
-                style: GoogleFonts.manrope(
-                    fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              'Discovered Peers',
+              style: GoogleFonts.manrope(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
-            if (_peers.isEmpty) const Text('Searching for VaniLink devices...'),
-            ..._peers.map((p) => ListTile(
-                  leading: const CircleAvatar(
-                      backgroundColor: Colors.black,
-                      child: Icon(Icons.wifi, color: Colors.white)),
-                  title: Text(p.deviceName,
-                      style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-                  subtitle: Text(p.deviceAddress),
-                  onTap: () {
-                    _p2p.connectToDevice(p.deviceAddress);
-                    Navigator.pop(context);
-                  },
-                )),
+            if (_peers.isEmpty)
+              const Text('Searching for VaniLink devices nearby...'),
+            ..._peers.map(
+              (p) => ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF14171E),
+                  child: Icon(Icons.wifi, color: Colors.white),
+                ),
+                title: Text(p.deviceName, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                subtitle: Text(p.deviceAddress),
+                onTap: () {
+                  _p2p.connectToDevice(p.deviceAddress);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  void _onNavTapped(int index) {
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  // ─── UI ────────────────────────────────────────────────────────────────
-
+  // ─── UI BUILD ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
-      // Top Hamburger Menu Overlay
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(80),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      key: _scaffoldKey,
+      backgroundColor: const Color(0xFFF4F6FB), // Vibrant Canvas
+      drawer: _buildHamburgerDrawer(),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
               children: [
-                Text(
-                  _getTitle(),
-                  style: GoogleFonts.manrope(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                _buildHeader(),
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    onPageChanged: (idx) => setState(() => _currentIndex = idx),
+                    physics: const BouncingScrollPhysics(),
+                    children: [
+                      _buildCommsPage(),
+                      _buildMapPage(),
+                      _buildNetworkPage(),
+                    ],
                   ),
                 ),
-                // Hamburger Menu matched to CO2 Calculator Reference
-                Row(
-                  children: [
-                    Text(
-                      'menu',
-                      style: GoogleFonts.manrope(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.menu, size: 28),
-                  ],
-                ),
               ],
             ),
-          ),
+
+            // Floating Tactical Pill Dock
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 24,
+              child: _buildFloatingDock(),
+            ),
+          ],
         ),
       ),
-      body: Stack(
-        children: [
-          // Fluid swiping between pages
-          PageView(
-            controller: _pageController,
-            onPageChanged: (idx) => setState(() => _currentIndex = idx),
-            physics: const BouncingScrollPhysics(),
-            children: [
-              _buildCommsPage(),
-              _buildMapPage(),
-              _buildNetworkPage(),
-            ],
-          ),
-          
-          // Floating Pill Navigation (Matched to Runmate reference)
-          Positioned(
-            bottom: 32,
-            left: 24,
-            right: 24,
-            child: _buildFloatingNavBar(),
-          ),
-        ],
-      ),
-      // Microphone Button (Floats above everything, offset slightly above pill)
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 90.0),
-        child: GestureDetector(
-          onTapDown: (_) {
-            _latency.onSpeechStarted();
-            _stt.startListening();
-          },
-          onTapUp: (_) => _stt.stopListening(),
-          onTapCancel: () => _stt.stopListening(),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: _stt.isListening ? 64.0 : 56.0,
-            height: _stt.isListening ? 64.0 : 56.0,
-            decoration: BoxDecoration(
-              color: _isEmergencyMode ? Colors.red : Colors.black,
-              shape: BoxShape.circle,
-              boxShadow: [
-                if (_stt.isListening)
-                  BoxShadow(
-                    color: _isEmergencyMode ? Colors.red.withOpacity(0.5) : Colors.black38,
-                    blurRadius: 20,
-                    spreadRadius: 4,
-                  )
-              ],
-            ),
-            child: Icon(
-              _stt.isListening ? Icons.mic : Icons.mic_none,
-              color: Colors.white,
-              size: 28,
-            ),
-          ),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  String _getTitle() {
-    switch (_currentIndex) {
-      case 0:
-        return 'Communication';
-      case 1:
-        return 'Map Tracking';
-      case 2:
-        return 'Network Setup';
-      default:
-        return '';
-    }
+  Widget _buildHamburgerDrawer() {
+    return Drawer(
+      backgroundColor: const Color(0xFF14171E),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Text(
+                'VaniLink\nNavigation',
+                style: GoogleFonts.manrope(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                ),
+              ),
+            ),
+            _buildDrawerItem(Icons.chat_bubble_outline_rounded, 'Communication', 0),
+            _buildDrawerItem(Icons.map_outlined, 'Map Tracking', 1),
+            _buildDrawerItem(Icons.hub_outlined, 'Network & Mesh', 2),
+            const Divider(color: Colors.white24, indent: 24, endIndent: 24, height: 40),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Text('Diagnostics (Local Loopback)', 
+                style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: Text('Enable Mic Loopback', style: GoogleFonts.manrope(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('TTS plays your own STT output', style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12)),
+              value: _isLoopbackTestEnabled,
+              activeTrackColor: const Color(0xFFD4F651),
+              onChanged: (val) {
+                setState(() => _isLoopbackTestEnabled = val);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.volume_up, color: Color(0xFF38B6FF)),
+              title: Text('Test TTS Synthesis', style: GoogleFonts.manrope(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('Plays predefined test string', style: GoogleFonts.manrope(color: Colors.white54, fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(context); // close drawer
+                final testStr = _selectedLanguage.code == 'hi' 
+                    ? "नमस्ते, वानीलिंक वॉकी-टॉकी का परीक्षण सफल रहा।"
+                    : "VaniLink walkie talkie test. System is operational.";
+                final audio = SpeechService().synthesizeSpeech(testStr);
+                if (audio.isNotEmpty) {
+                  await TtsPlayer().playSpeech(audio);
+                }
+              },
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Text(
+                'Status: $_connectionStatus',
+                style: GoogleFonts.manrope(color: Colors.white54, fontSize: 14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  Widget _buildFloatingNavBar() {
-    return Container(
-      height: 72,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A), // Thick black pill
-        borderRadius: BorderRadius.circular(36),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 16,
-            offset: Offset(0, 8),
-          ),
-        ],
+  Widget _buildDrawerItem(IconData icon, String title, int pageIndex) {
+    final isSelected = _currentIndex == pageIndex;
+    return ListTile(
+      leading: Icon(icon, color: isSelected ? const Color(0xFF38B6FF) : Colors.white70),
+      title: Text(
+        title,
+        style: GoogleFonts.manrope(
+          color: isSelected ? Colors.white : Colors.white70,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+          fontSize: 18,
+        ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      onTap: () {
+        Navigator.pop(context);
+        _pageController.animateToPage(
+          pageIndex,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildNavItem(0, Icons.chat_bubble_outline, Icons.chat_bubble),
-          _buildNavItem(1, Icons.map_outlined, Icons.map),
-          _buildNavItem(2, Icons.hub_outlined, Icons.hub),
+          // Drawer Trigger & Connection Pill
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.menu_rounded, color: Color(0xFF14171E), size: 28),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              ),
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: _wifiP2PInfo?.isConnected == true
+                            ? const Color(0xFF38B6FF) // Electric Sky Blue
+                            : Colors.amber,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _wifiP2PInfo?.isConnected == true ? 'Wi-Fi P2P Linked' : 'Syncing...',
+                      style: GoogleFonts.manrope(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: const Color(0xFF14171E),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // Language Selector Pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E6EF)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<AppLanguage>(
+                value: _selectedLanguage,
+                icon: const Icon(Icons.arrow_drop_down_rounded, color: Color(0xFF14171E)),
+                style: GoogleFonts.manrope(
+                  color: const Color(0xFF14171E),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+                items: AppLanguage.values.map((lang) {
+                  return DropdownMenuItem<AppLanguage>(
+                    value: lang,
+                    child: Text(lang.name.toUpperCase()),
+                  );
+                }).toList(),
+                onChanged: (newLang) {
+                  if (newLang != null) {
+                    setState(() => _selectedLanguage = newLang);
+                    _stt.setLanguage(newLang);
+                  }
+                },
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildNavItem(int index, IconData iconOutlined, IconData iconFilled) {
-    final isSelected = _currentIndex == index;
-    return GestureDetector(
-      onTap: () => _onNavTapped(index),
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.white.withAlpha(50) : Colors.transparent,
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          isSelected ? iconFilled : iconOutlined,
-          color: Colors.white,
-          size: 28,
-        ),
+  // ─── TABS / PAGES ────────────────────────────────────────────────────────
+  Widget _buildCommsPage() {
+    return Column(
+      children: [
+        const SizedBox(height: 10),
+        _buildVibrantBentoRow(),
+        const SizedBox(height: 12),
+        Expanded(child: _buildTranscriptList()),
+      ],
+    );
+  }
+
+  Widget _buildVibrantBentoRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          // Bento Card 1: Electric Coral Bandwidth Card
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B4A), // Electric Coral
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF6B4A).withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'BANDWIDTH SAVED',
+                    style: GoogleFonts.manrope(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 10,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '99.2%',
+                    style: GoogleFonts.manrope(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '~64 B / packet',
+                    style: GoogleFonts.manrope(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Bento Card 2: Lime-Mint Silero VAD Card
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD4F651), // Bright Neon Lime
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFD4F651).withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SILERO VAD ENERGY',
+                    style: GoogleFonts.manrope(
+                      color: const Color(0xFF2E380D),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 10,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: List.generate(
+                      5,
+                      (i) => Container(
+                        margin: const EdgeInsets.only(right: 5),
+                        width: 7,
+                        height: _stt.isListening ? 14 + (12 * _speechProb * (i % 2 == 0 ? 1 : 0.5)) : 14,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF14171E),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _stt.isListening ? 'SPEECH DETECTED' : 'IDLE / GATED',
+                    style: GoogleFonts.manrope(
+                      color: const Color(0xFF2E380D),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ─── PAGES ────────────────────────────────────────────────────────────────
-
-  Widget _buildCommsPage() {
-    return SingleChildScrollView(
+  Widget _buildTranscriptList() {
+    final totalCount = _messages.length + (_liveTranscript.isNotEmpty ? 1 : 0);
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 140),
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 150),
+      itemCount: totalCount,
+      itemBuilder: (context, index) {
+        if (_liveTranscript.isNotEmpty && index == 0) {
+          return _buildMessageBubble(
+            sender: 'You (Speaking...)',
+            text: _liveTranscript,
+            lang: _selectedLanguage.name.toUpperCase(),
+            bytes: utf8.encode(_liveTranscript).length,
+            isIncoming: false,
+          );
+        }
+        final msgIndex = _liveTranscript.isNotEmpty ? index - 1 : index;
+        final msg = _messages[msgIndex];
+        return _buildMessageBubble(
+          sender: msg.sender,
+          text: msg.text,
+          lang: msg.lang,
+          bytes: msg.bytes,
+          isIncoming: msg.isIncoming,
+        );
+      },
+    );
+  }
+
+  Widget _buildMessageBubble({
+    required String sender,
+    required String text,
+    required String lang,
+    required dynamic bytes,
+    required bool isIncoming,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isIncoming ? Colors.white : const Color(0xFFE8FBD9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isIncoming ? const Color(0xFFE5E9F2) : const Color(0xFFC7F0A1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Communicate\nand coordinate',
-              style: GoogleFonts.manrope(
-                  fontSize: 32, fontWeight: FontWeight.bold, height: 1.1)),
-          const SizedBox(height: 24),
-
-          // Transcript Card (Mint Green)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFFBBE5D9),
-              borderRadius: BorderRadius.circular(32),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                sender,
+                style: GoogleFonts.manrope(
+                  color: isIncoming ? const Color(0xFF4D8BFF) : const Color(0xFF14171E),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF14171E),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      lang,
+                      style: GoogleFonts.manrope(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$bytes B',
+                    style: GoogleFonts.manrope(
+                      color: Colors.black45,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            style: GoogleFonts.manrope(
+              color: const Color(0xFF14171E),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          ),
+          if (isIncoming) ...[
+            const SizedBox(height: 10),
+            Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Live Transcript',
-                        style: GoogleFonts.manrope(
-                            fontSize: 18, fontWeight: FontWeight.w600)),
-                    Icon(
-                        _stt.isListening ? Icons.mic : Icons.mic_none,
-                        color: _stt.isListening ? Colors.red : Colors.black54),
-                  ],
-                ),
-                const SizedBox(height: 8),
+                const Icon(Icons.volume_up_rounded, color: Color(0xFF4D8BFF), size: 16),
+                const SizedBox(width: 6),
                 Text(
-                  _liveTranscript.isEmpty
-                      ? 'Hold the PTT button to speak...'
-                      : _liveTranscript,
+                  'Synthesized via on-device TTS',
                   style: GoogleFonts.manrope(
-                      fontSize: 16, color: Colors.black87),
-                ),
-                const SizedBox(height: 24),
-                // VAD Bar
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: LinearProgressIndicator(
-                    value: _speechProb,
-                    backgroundColor: Colors.white54,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.black),
-                    minHeight: 12,
+                    color: const Color(0xFF4D8BFF),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Status & Emergency Settings
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.settings, size: 20),
-                    const SizedBox(width: 8),
-                    Text('Settings',
-                        style: GoogleFonts.manrope(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                
-                // Emergency Toggle inside card
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Emergency Mode',
-                      style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600)),
-                    Switch(
-                      value: _isEmergencyMode,
-                      activeColor: Colors.red,
-                      onChanged: (val) => _toggleEmergencyMode(),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-
-                // Language Selector inside card
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Language',
-                      style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600)),
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<AppLanguage>(
-                        value: _selectedLanguage,
-                        icon: const Icon(Icons.arrow_drop_down, color: Colors.black),
-                        style: GoogleFonts.manrope(color: Colors.black, fontWeight: FontWeight.bold),
-                        onChanged: (AppLanguage? newValue) {
-                          if (newValue != null) {
-                            setState(() => _selectedLanguage = newValue);
-                            _stt.setLanguage(newValue);
-                            SpeechService().setTtsLanguage(newValue.code);
-                          }
-                        },
-                        items: AppLanguage.values.map((AppLanguage lang) {
-                          return DropdownMenuItem<AppLanguage>(
-                            value: lang,
-                            child: Text(lang.displayName),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildMapPage() {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-      child: FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(
-          initialCenter: _currentPosition != null
-              ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
-              : const LatLng(20.5937, 78.9629), // Default India
-          initialZoom: 15.0,
-        ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.vanilink',
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 120.0),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        child: FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _currentPosition != null
+                ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+                : const LatLng(20.5937, 78.9629),
+            initialZoom: 15.0,
           ),
-          MarkerLayer(
-            markers: [
-              // Current User
-              if (_currentPosition != null)
-                Marker(
-                  point: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-                  width: 40,
-                  height: 40,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.vanilink',
+            ),
+            MarkerLayer(
+              markers: [
+                if (_currentPosition != null)
+                  Marker(
+                    point: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+                    width: 40,
+                    height: 40,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF38B6FF),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                      ),
+                      child: const Icon(Icons.person, color: Colors.white, size: 20),
                     ),
-                    child: const Icon(Icons.person, color: Colors.white, size: 20),
                   ),
-                ),
-              // Peers
-              ..._peerLocations.values.map((p) => Marker(
+                ..._peerLocations.values.map(
+                  (p) => Marker(
                     point: p.position,
                     width: 40,
                     height: 40,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.black,
+                        color: const Color(0xFF14171E),
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
                       ),
                       child: const Icon(Icons.headset, color: Colors.white, size: 20),
                     ),
-                  )),
-            ],
-          ),
-        ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -576,22 +798,23 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildNetworkPage() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 150),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 140),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Build your\nmesh network',
-              style: GoogleFonts.manrope(
-                  fontSize: 32, fontWeight: FontWeight.bold, height: 1.1)),
-          const SizedBox(height: 24),
-          
-          // Connection Status Card
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(32),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -599,15 +822,14 @@ class _MainLayoutState extends State<MainLayout> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Status',
-                        style: GoogleFonts.manrope(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('Mesh Network',
+                        style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.bold)),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: _wifiP2PInfo?.isConnected == true
-                            ? Colors.green.withAlpha(50)
-                            : Colors.grey.withAlpha(50),
+                            ? const Color(0xFFD4F651)
+                            : const Color(0xFFE2E6EF),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -615,34 +837,35 @@ class _MainLayoutState extends State<MainLayout> {
                         style: GoogleFonts.manrope(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: _wifiP2PInfo?.isConnected == true
-                              ? Colors.green[700]
-                              : Colors.black87,
+                          color: const Color(0xFF14171E),
                         ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                
-                // Add Peer Button
+                const SizedBox(height: 24),
                 InkWell(
                   onTap: _showDiscoverySheet,
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.black12, width: 2),
+                      border: Border.all(color: const Color(0xFF14171E), width: 2),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.add),
+                        const Icon(Icons.radar, color: Color(0xFF14171E)),
                         const SizedBox(width: 8),
-                        Text('Discover Peers',
-                            style: GoogleFonts.manrope(
-                                fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text(
+                          'Discover Peers',
+                          style: GoogleFonts.manrope(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF14171E),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -651,21 +874,19 @@ class _MainLayoutState extends State<MainLayout> {
             ),
           ),
           const SizedBox(height: 16),
-
           // Latency Card
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A), // Thick black card
-              borderRadius: BorderRadius.circular(32),
+              color: const Color(0xFF14171E),
+              borderRadius: BorderRadius.circular(24),
             ),
             child: StreamBuilder<LatencyReport>(
               stream: _latency.reportStream,
               builder: (context, snap) {
                 final sttMs = snap.data?.sttLatencyMs ?? 0;
                 final rtf = snap.data?.rtf?.toStringAsFixed(2) ?? 'N/A';
-                
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -673,9 +894,14 @@ class _MainLayoutState extends State<MainLayout> {
                       children: [
                         const Icon(Icons.speed, color: Colors.white, size: 20),
                         const SizedBox(width: 8),
-                        Text('Performance Metrics',
-                            style: GoogleFonts.manrope(
-                                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                        Text(
+                          'Telemetry',
+                          style: GoogleFonts.manrope(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -684,7 +910,7 @@ class _MainLayoutState extends State<MainLayout> {
                       children: [
                         _buildMetricColumn('STT Latency', '${sttMs}ms'),
                         _buildMetricColumn('RTF', rtf),
-                        _buildMetricColumn('Peers', '${_peers.length}'),
+                        _buildMetricColumn('Active Nodes', '${_peers.length}'),
                       ],
                     ),
                   ],
@@ -701,10 +927,93 @@ class _MainLayoutState extends State<MainLayout> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: GoogleFonts.manrope(fontSize: 12, color: Colors.white54)),
+        Text(
+          label,
+          style: GoogleFonts.manrope(
+            fontSize: 11,
+            color: Colors.white54,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(value, style: GoogleFonts.manrope(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+        Text(
+          value,
+          style: GoogleFonts.manrope(
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildFloatingDock() {
+    return Container(
+      height: 88,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14171E), // Jet Black contrast anchor
+        borderRadius: BorderRadius.circular(44),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF14171E).withValues(alpha: 0.3),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Vibrant SOS Alarm Button
+          IconButton(
+            icon: Icon(
+              Icons.emergency_rounded,
+              color: _isEmergencyMode ? const Color(0xFFFF5252) : Colors.white54,
+              size: 30,
+            ),
+            onPressed: () {
+              HapticFeedback.vibrate();
+              _toggleEmergencyMode();
+            },
+          ),
+
+          // Glowing Electric Peach PTT Button (Center Hero)
+          GestureDetector(
+            onTapDown: (_) => _onPttPress(),
+            onTapUp: (_) => _onPttRelease(),
+            onTapCancel: () => _onPttRelease(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: _stt.isListening ? 78 : 68,
+              height: _stt.isListening ? 78 : 68,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B4A), // Electric Peach / Coral
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF6B4A).withValues(alpha: _stt.isListening ? 0.6 : 0.35),
+                    blurRadius: _stt.isListening ? 24 : 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(
+                _stt.isListening ? Icons.graphic_eq_rounded : Icons.mic_rounded,
+                color: Colors.white,
+                size: 34,
+              ),
+            ),
+          ),
+
+          // Settings / Drawer Toggle
+          IconButton(
+            icon: const Icon(Icons.tune_rounded, color: Colors.white70, size: 26),
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          ),
+        ],
+      ),
     );
   }
 }
