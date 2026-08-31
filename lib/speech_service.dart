@@ -71,34 +71,32 @@ class SpeechService {
       final modelPath = await _extractAsset('assets/models/tts/$langCode/model.onnx');
       final tokensPath = await _extractAsset('assets/models/tts/$langCode/tokens.txt');
 
-      final dir = await getApplicationCacheDirectory();
+      // Use documents directory for persistent storage of espeak-ng-data
+      final dir = await getApplicationDocumentsDirectory();
       final espeakDataDir = Directory('${dir.path}/espeak-ng-data');
 
-      // 1. FORCE CLEAN EXTRACTION
-      // Delete the old corrupted extraction if it exists so we can do it right
-      if (espeakDataDir.existsSync()) {
-        espeakDataDir.deleteSync(recursive: true);
-      }
+      // Only extract if the directory doesn't exist
+      if (!espeakDataDir.existsSync()) {
+        await espeakDataDir.create(recursive: true);
+        print('📦 Extracting espeak-ng-data.zip securely...');
+        final byteData = await rootBundle.load('assets/models/tts/$langCode/espeak-ng-data.zip');
+        final bytes = byteData.buffer.asUint8List();
+        final archive = ZipDecoder().decodeBytes(bytes);
 
-      // Recreate the directory after deletion
-      await espeakDataDir.create(recursive: true);
+        for (final file in archive) {
+          String filename = file.name.replaceAll('\\', '/');
+          if (filename.isEmpty) continue;
 
-      print('📦 Extracting espeak-ng-data.zip securely...');
-      final byteData = await rootBundle.load('assets/models/tts/$langCode/espeak-ng-data.zip');
-      final bytes = byteData.buffer.asUint8List();
-      final archive = ZipDecoder().decodeBytes(bytes);
-
-      for (final file in archive) {
-        String filename = file.name;
-        if (filename.isEmpty) continue;
-
-        final outFile = File('${espeakDataDir.path}/$filename');
-        if (file.isFile) {
-          await outFile.parent.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
-        } else {
-          await Directory('${espeakDataDir.path}/$filename').create(recursive: true);
+          final outFile = File('${espeakDataDir.path}/$filename');
+          if (file.isFile) {
+            await outFile.parent.create(recursive: true);
+            await outFile.writeAsBytes(file.content as List<int>);
+          } else {
+            await Directory('${espeakDataDir.path}/$filename').create(recursive: true);
+          }
         }
+      } else {
+        print('📦 Using existing espeak-ng-data extraction');
       }
 
       // Check if we have an espeak-ng-data subdirectory (common in zips)
@@ -113,6 +111,14 @@ class SpeechService {
 
       if (!testPhontab.existsSync()) {
         print('❌ FATAL: espeak data extracted incorrectly. Phontab missing!');
+        print('Directory contents of ${dataDirToUse.path}:');
+        if (dataDirToUse.existsSync()) {
+          for (var item in dataDirToUse.listSync(recursive: true)) {
+            print(' - ${item.path}');
+          }
+        } else {
+          print('Directory does not exist!');
+        }
         return; // Abort before C++ crashes the app
       }
       if (testModel.lengthSync() < 1000) {
@@ -183,8 +189,8 @@ class SpeechService {
     final safeFileName = assetPath.replaceAll('/', '_');
     final file = File('${dir.path}/$safeFileName');
 
-    if (!file.existsSync()) {
-      final data = await rootBundle.load(assetPath);
+    final data = await rootBundle.load(assetPath);
+    if (!file.existsSync() || file.lengthSync() != data.lengthInBytes) {
       await file.writeAsBytes(data.buffer.asUint8List());
     }
     return file.path;

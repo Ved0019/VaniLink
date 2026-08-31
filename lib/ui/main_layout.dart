@@ -56,7 +56,6 @@ class _MainLayoutState extends State<MainLayout> {
   // State
   String _liveTranscript = '';
   final List<ChatMessage> _messages = [];
-  double _speechProb = 0.0;
   bool _isEmergencyMode = false;
   bool _isLoopbackTestEnabled = false;
 
@@ -91,7 +90,7 @@ class _MainLayoutState extends State<MainLayout> {
 
     // Listen to STT VAD probability for UI feedback
     _stt.speechProbabilityStream.listen((prob) {
-      if (mounted) setState(() => _speechProb = prob);
+      // Unused in current UI structure, but stream must be consumed
     });
 
     // Listen to P2P network changes
@@ -267,32 +266,20 @@ class _MainLayoutState extends State<MainLayout> {
       backgroundColor: const Color(0xFFF4F6FB), // Vibrant Canvas
       drawer: _buildHamburgerDrawer(),
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                _buildHeader(),
-                Expanded(
-                  child: PageView(
-                    controller: _pageController,
-                    onPageChanged: (idx) => setState(() => _currentIndex = idx),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
-                      _buildCommsPage(),
-                      _buildMapPage(),
-                      _buildNetworkPage(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            // Floating Tactical Pill Dock
-            Positioned(
-              left: 20,
-              right: 20,
-              bottom: 24,
-              child: _buildFloatingDock(),
+            _buildHeader(),
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                onPageChanged: (idx) => setState(() => _currentIndex = idx),
+                physics: const BouncingScrollPhysics(),
+                children: [
+                  _buildCommsPage(),
+                  _buildMapPage(),
+                  _buildNetworkPage(),
+                ],
+              ),
             ),
           ],
         ),
@@ -393,87 +380,85 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
-          // Drawer Trigger & Connection Pill
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
                 icon: const Icon(Icons.menu_rounded, color: Color(0xFF14171E), size: 28),
                 onPressed: () => _scaffoldKey.currentState?.openDrawer(),
               ),
-              const SizedBox(width: 4),
+              Text(
+                'VaniLink',
+                style: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 22,
+                  color: const Color(0xFF14171E),
+                ),
+              ),
+              // Language Selector Pill
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  border: Border.all(color: const Color(0xFFE2E6EF)),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: _wifiP2PInfo?.isConnected == true
-                            ? const Color(0xFF38B6FF) // Electric Sky Blue
-                            : Colors.amber,
-                        shape: BoxShape.circle,
-                      ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<AppLanguage>(
+                    value: _selectedLanguage,
+                    icon: const Icon(Icons.arrow_drop_down_rounded, color: Color(0xFF14171E)),
+                    style: GoogleFonts.manrope(
+                      color: const Color(0xFF14171E),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _wifiP2PInfo?.isConnected == true ? 'Wi-Fi P2P Linked' : 'Syncing...',
-                      style: GoogleFonts.manrope(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: const Color(0xFF14171E),
-                      ),
-                    ),
-                  ],
+                    onChanged: (lang) {
+                      if (lang != null) {
+                        setState(() => _selectedLanguage = lang);
+                        _stt.setLanguage(lang);
+                      }
+                    },
+                    items: AppLanguage.values.map((lang) {
+                      return DropdownMenuItem(
+                        value: lang,
+                        child: Text(lang.name),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
             ],
           ),
-
-          // Language Selector Pill
+          const SizedBox(height: 12),
+          // Connection Pill
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: _wifiP2PInfo?.isConnected == true
+                  ? const Color(0xFF34C759) // Green like reference
+                  : Colors.amber,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: const Color(0xFFE2E6EF)),
             ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<AppLanguage>(
-                value: _selectedLanguage,
-                icon: const Icon(Icons.arrow_drop_down_rounded, color: Color(0xFF14171E)),
-                style: GoogleFonts.manrope(
-                  color: const Color(0xFF14171E),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _wifiP2PInfo?.isConnected == true ? Icons.wifi : Icons.sync,
+                  color: Colors.white,
+                  size: 18,
                 ),
-                items: AppLanguage.values.map((lang) {
-                  return DropdownMenuItem<AppLanguage>(
-                    value: lang,
-                    child: Text(lang.name.toUpperCase()),
-                  );
-                }).toList(),
-                onChanged: (newLang) {
-                  if (newLang != null) {
-                    setState(() => _selectedLanguage = newLang);
-                    _stt.setLanguage(newLang);
-                  }
-                },
-              ),
+                const SizedBox(width: 8),
+                Text(
+                  _wifiP2PInfo?.isConnected == true ? 'Wi-Fi Direct Connected' : 'Syncing...',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -485,126 +470,92 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildCommsPage() {
     return Column(
       children: [
-        const SizedBox(height: 10),
-        _buildVibrantBentoRow(),
-        const SizedBox(height: 12),
-        Expanded(child: _buildTranscriptList()),
+        Expanded(
+          flex: 4,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildGiantPttButton(),
+              const SizedBox(height: 24),
+              Text(
+                'Push-to-Talk',
+                style: GoogleFonts.manrope(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF14171E),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 3,
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FC), // Very light grey blue
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E6EF)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: _buildTranscriptList(),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildVibrantBentoRow() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          // Bento Card 1: Electric Coral Bandwidth Card
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B4A), // Electric Coral
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFF6B4A).withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'BANDWIDTH SAVED',
-                    style: GoogleFonts.manrope(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 10,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '99.2%',
-                    style: GoogleFonts.manrope(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '~64 B / packet',
-                    style: GoogleFonts.manrope(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  Widget _buildGiantPttButton() {
+    return GestureDetector(
+      onTapDown: (_) {
+        HapticFeedback.heavyImpact();
+        _onPttPress();
+      },
+      onTapUp: (_) {
+        _onPttRelease();
+      },
+      onTapCancel: () {
+        _onPttRelease();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: _stt.isListening ? 190 : 200,
+        height: _stt.isListening ? 190 : 200,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xFFFF6B4A), // Electric Coral
+          border: Border.all(
+            color: const Color(0xFFD84A2A), // Darker Orange Border
+            width: 14,
           ),
-          const SizedBox(width: 12),
-
-          // Bento Card 2: Lime-Mint Silero VAD Card
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD4F651), // Bright Neon Lime
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFD4F651).withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+          boxShadow: [
+            if (_stt.isListening)
+              BoxShadow(
+                color: const Color(0xFFFF6B4A).withValues(alpha: 0.4),
+                blurRadius: 40,
+                spreadRadius: 10,
+              )
+            else
+              BoxShadow(
+                color: const Color(0xFFFF6B4A).withValues(alpha: 0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'SILERO VAD ENERGY',
-                    style: GoogleFonts.manrope(
-                      color: const Color(0xFF2E380D),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 10,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: List.generate(
-                      5,
-                      (i) => Container(
-                        margin: const EdgeInsets.only(right: 5),
-                        width: 7,
-                        height: _stt.isListening ? 14 + (12 * _speechProb * (i % 2 == 0 ? 1 : 0.5)) : 14,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF14171E),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _stt.isListening ? 'SPEECH DETECTED' : 'IDLE / GATED',
-                    style: GoogleFonts.manrope(
-                      color: const Color(0xFF2E380D),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
+        child: const Icon(
+          Icons.graphic_eq_rounded,
+          size: 64,
+          color: Colors.white, // Waveform icon
+        ),
       ),
     );
   }
@@ -612,7 +563,7 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildTranscriptList() {
     final totalCount = _messages.length + (_liveTranscript.isNotEmpty ? 1 : 0);
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 140),
+      padding: const EdgeInsets.all(8),
       physics: const BouncingScrollPhysics(),
       itemCount: totalCount,
       itemBuilder: (context, index) {
@@ -948,72 +899,5 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  Widget _buildFloatingDock() {
-    return Container(
-      height: 88,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF14171E), // Jet Black contrast anchor
-        borderRadius: BorderRadius.circular(44),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF14171E).withValues(alpha: 0.3),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // Vibrant SOS Alarm Button
-          IconButton(
-            icon: Icon(
-              Icons.emergency_rounded,
-              color: _isEmergencyMode ? const Color(0xFFFF5252) : Colors.white54,
-              size: 30,
-            ),
-            onPressed: () {
-              HapticFeedback.vibrate();
-              _toggleEmergencyMode();
-            },
-          ),
 
-          // Glowing Electric Peach PTT Button (Center Hero)
-          GestureDetector(
-            onTapDown: (_) => _onPttPress(),
-            onTapUp: (_) => _onPttRelease(),
-            onTapCancel: () => _onPttRelease(),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: _stt.isListening ? 78 : 68,
-              height: _stt.isListening ? 78 : 68,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B4A), // Electric Peach / Coral
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFF6B4A).withValues(alpha: _stt.isListening ? 0.6 : 0.35),
-                    blurRadius: _stt.isListening ? 24 : 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(
-                _stt.isListening ? Icons.graphic_eq_rounded : Icons.mic_rounded,
-                color: Colors.white,
-                size: 34,
-              ),
-            ),
-          ),
-
-          // Settings / Drawer Toggle
-          IconButton(
-            icon: const Icon(Icons.tune_rounded, color: Colors.white70, size: 26),
-            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          ),
-        ],
-      ),
-    );
-  }
 }

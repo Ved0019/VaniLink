@@ -66,3 +66,17 @@ flutter:
     - assets/models/tts/te/espeak-ng-data.zip
     - assets/models/tts/or/espeak-ng-data.zip
     - assets/models/tts/bn/espeak-ng-data.zip
+
+    - assets/models/stt/indic/
+    - assets/models/stt/indic/hi/
+    - assets/models/stt/indic/gu/
+    - assets/models/stt/indic/mr/
+    - assets/models/stt/indic/ta/
+    - assets/models/stt/indic/te/
+    - assets/models/stt/indic/kn/
+    - assets/models/stt/indic/ml/
+    - assets/models/stt/indic/bn/
+    - assets/models/stt/indic/pa/
+    - assets/models/stt/indic/as/
+    - assets/models/stt/english/
+    - assets/models/stt/hinglish/swift/
