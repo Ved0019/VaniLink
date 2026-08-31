@@ -70,10 +70,10 @@ class SpeechService {
     try {
       final modelPath = await _extractAsset('assets/models/tts/$langCode/model.onnx');
       final tokensPath = await _extractAsset('assets/models/tts/$langCode/tokens.txt');
-      
+
       final dir = await getApplicationCacheDirectory();
       final espeakDataDir = Directory('${dir.path}/espeak-ng-data');
-      
+
       // 1. FORCE CLEAN EXTRACTION
       // Delete the old corrupted extraction if it exists so we can do it right
       if (espeakDataDir.existsSync()) {
@@ -82,18 +82,14 @@ class SpeechService {
 
       // Recreate the directory after deletion
       await espeakDataDir.create(recursive: true);
-      
+
       print('📦 Extracting espeak-ng-data.zip securely...');
       final byteData = await rootBundle.load('assets/models/tts/$langCode/espeak-ng-data.zip');
       final bytes = byteData.buffer.asUint8List();
       final archive = ZipDecoder().decodeBytes(bytes);
-      
+
       for (final file in archive) {
         String filename = file.name;
-        // Normalize the path: strip the root folder name if the zip included it
-        if (filename.startsWith('espeak-ng-data/')) {
-          filename = filename.replaceFirst('espeak-ng-data/', '');
-        }
         if (filename.isEmpty) continue;
 
         final outFile = File('${espeakDataDir.path}/$filename');
@@ -105,10 +101,16 @@ class SpeechService {
         }
       }
 
+      // Check if we have an espeak-ng-data subdirectory (common in zips)
+      final possibleDataDir = Directory('${espeakDataDir.path}/espeak-ng-data');
+      final dataDirToUse = possibleDataDir.existsSync()
+          ? possibleDataDir
+          : espeakDataDir;
+
       // 2. PRE-FLIGHT CHECK (Prevent C++ Crash)
-      final testPhontab = File('${espeakDataDir.path}/phontab');
+      final testPhontab = File('${dataDirToUse.path}/phontab');
       final testModel = File(modelPath);
-      
+
       if (!testPhontab.existsSync()) {
         print('❌ FATAL: espeak data extracted incorrectly. Phontab missing!');
         return; // Abort before C++ crashes the app
@@ -127,15 +129,15 @@ class SpeechService {
             vits: sherpa_onnx.OfflineTtsVitsModelConfig(
               model: modelPath,
               tokens: tokensPath,
-              dataDir: espeakDataDir.path,
+              dataDir: dataDirToUse.path,
             ),
-            numThreads: 1, 
+            numThreads: 1,
             debug: false,
-            provider: 'cpu', 
+            provider: 'cpu',
           ),
         ),
       );
-      
+
       _ttsReady = true;
       print('✅ TTS ($langCode) initialized successfully');
     } catch (e) {
@@ -176,11 +178,11 @@ class SpeechService {
 
   Future<String> _extractAsset(String assetPath) async {
     final dir = await getApplicationCacheDirectory();
-    
+
     // FIX: Replace slashes with underscores so tokens.txt from STT and TTS don't overwrite each other!
-    final safeFileName = assetPath.replaceAll('/', '_'); 
+    final safeFileName = assetPath.replaceAll('/', '_');
     final file = File('${dir.path}/$safeFileName');
-    
+
     if (!file.existsSync()) {
       final data = await rootBundle.load(assetPath);
       await file.writeAsBytes(data.buffer.asUint8List());
